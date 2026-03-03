@@ -19,9 +19,7 @@ function ensureSelectionIndex(n) {
 export function normalize(view) {
   const v = view || {};
 
-  // -----------------------------
   // Case A: VM-style snapshot (Mock/Electron backend)
-  // -----------------------------
   if (Array.isArray(v.buses)) {
     const buses = v.buses || [];
     const activeBusId = asStr(v.activeBusId, "");
@@ -35,6 +33,20 @@ export function normalize(view) {
       (b) => asStr(b?.id, "") === activeBusId
     );
 
+    const fxByGuid =
+      v.fxByGuid && typeof v.fxByGuid === "object" ? v.fxByGuid : {};
+
+    const fxOrderByTrackGuid =
+      v.fxOrderByTrackGuid && typeof v.fxOrderByTrackGuid === "object"
+        ? v.fxOrderByTrackGuid
+        : {};
+
+    // ✅ NEW: params manifests by fxGuid (lazy-loaded)
+    const fxParamsByGuid =
+      v.fxParamsByGuid && typeof v.fxParamsByGuid === "object"
+        ? v.fxParamsByGuid
+        : {};
+
     return {
       snapshot: {
         seq: asNum(v.seq, 0),
@@ -43,6 +55,11 @@ export function normalize(view) {
 
         trackMix: v.trackMix && typeof v.trackMix === "object" ? v.trackMix : {},
         busMix: v.busMix && typeof v.busMix === "object" ? v.busMix : {},
+
+        // ✅ NEW: keep raw snapshot view too (helps verifiers + inspectors)
+        fxByGuid,
+        fxOrderByTrackGuid,
+        fxParamsByGuid,
       },
 
       reaper: { version: "mock", resourcePath: "" },
@@ -62,12 +79,11 @@ export function normalize(view) {
         tracksByGuid: {},
         trackOrder: [],
 
-        // ✅ FIX: map VM FX truth into entities so Reconcile can verify
-        fxByGuid: (v.fxByGuid && typeof v.fxByGuid === "object") ? v.fxByGuid : {},
-        fxOrderByTrackGuid:
-          (v.fxOrderByTrackGuid && typeof v.fxOrderByTrackGuid === "object")
-            ? v.fxOrderByTrackGuid
-            : {},
+        fxByGuid,
+        fxOrderByTrackGuid,
+
+        // ✅ NEW: expose params as truth entities too
+        fxParamsByGuid,
 
         routesById: {},
         routeIdsByTrackGuid: {},

@@ -50,6 +50,7 @@ export function reconcilePending(prevState, norm) {
     track: {},
     fx: {},
     fxOrderByTrackGuid: {},
+    fxParamsByGuid: {},
   };
 
   const collapsed = computeCollapsedSet(pendingOrder, pendingById);
@@ -476,6 +477,58 @@ function opVerifySnapshot(op, norm) {
         );
     }
 
+    // FX Params fetch (lazy)
+    // for mock: verify snapshot.fxParamsByGuidp[fxGuid] exists after syscall
+    // for electron: verify entities.fxParamsByGuidp[fxGuid] exists
+    case "getPluginParams": {
+      const { fxGuid } = intent || {};
+      if (!fxGuid) return v(false, "missing fxGuid");
+
+      // MOCK path
+      if (isMockVm(norm)) {
+        const hit =
+          norm?.entities?.fxParamsByGuid?.[fxGuid] ??
+          norm?.snapshot?.fxParamsByGuid?.[fxGuid];
+
+        if (!hit) return v(false, `mock fx params missing: ${fxGuid}`);
+
+        // ✅ For now, ack on presence (process-first)
+        return v(true, REASONS.OK);
+      }
+
+      // REAL path
+      const hit = norm?.entities?.fxParamsByGuid?.[fxGuid];
+      if (!hit) return v(false, `fx params missing: ${fxGuid}`);
+
+      return v(true, REASONS.OK);
+    }
+
+    case "setParamValue": {
+      const { fxGuid } = intent || {};
+      const paramIdx = Number(intent?.paramIdx);
+      const want = Number(intent?.value01 ?? intent?.value);
+
+      if (!fxGuid) return v(false, "missing fxGuid");
+      if (!Number.isFinite(paramIdx)) return v(false, "missing paramIdx");
+      if (!Number.isFinite(want)) return v(false, "missing value01");
+
+      // MOCK path: params live in snapshot/entities.fxParamsByGuid[fxGuid].params[*].value01
+      const hit =
+        norm?.entities?.fxParamsByGuid?.[fxGuid] ??
+        norm?.snapshot?.fxParamsByGuid?.[fxGuid];
+
+      if (!hit) return v(false, `fx params missing: ${fxGuid}`);
+
+      const p = hit?.params?.find?.((x) => Number(x?.idx) === paramIdx);
+      if (!p) return v(false, `param missing: idx=${paramIdx}`);
+
+      const got = Number(p.value01);
+      if (!Number.isFinite(got)) return v(false, `param value non-finite: idx=${paramIdx}`);
+
+      return nearlyEqual(got, want, EPS)
+        ? v(true, REASONS.OK)
+        : v(false, `param mismatch: want ≈${want} got ${got}`);
+    }
     case "syncView":
       return v(true, "syncView (no state assertion)");
 
@@ -600,6 +653,7 @@ function clearOverlayForOp(overlay, op) {
     track: { ...(overlay.track || {}) },
     fx: { ...(overlay.fx || {}) },
     fxOrderByTrackGuid: { ...(overlay.fxOrderByTrackGuid || {}) },
+    fxParamsByGuid: { ...(overlay.fxParamsByGuid || {}) }, 
   };
   if (optimistic.bus) {
     for (const id of Object.keys(optimistic.bus)) delete next.bus[id];
@@ -615,7 +669,21 @@ function clearOverlayForOp(overlay, op) {
       delete next.fxOrderByTrackGuid[trackGuid];
     }
   }
+  if (optimistic.fxParamsByGuid) {
+    for (const fxGuid of Object.keys(optimistic.fxParamsByGuid)) {
+      const byIdx = optimistic.fxParamsByGuid[fxGuid] || {};
+      const base = next.fxParamsByGuid[fxGuid];
+      if (!base) continue;
 
+      // delete only the indices touched
+      const copy = { ...(base || {}) };
+      for (const idx of Object.keys(byIdx)) delete copy[idx];
+
+      // cleanup empty object
+      if (Object.keys(copy).length === 0) delete next.fxParamsByGuid[fxGuid];
+      else next.fxParamsByGuid[fxGuid] = copy;
+    }
+  }
   return next;
 }
 

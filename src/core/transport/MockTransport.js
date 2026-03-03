@@ -1,11 +1,15 @@
-// src/core/transport/MockTransport.js
+import { makeMockParamManifestForFx } from "./MockParameterGenerator";
+
 // Mock transport with canonical syscall contract + meters telemetry channel.
 // ✅ Includes: selectActiveBus, setRoutingMode (alias setStateMode),
 //    setBusVolume, setTrackVolume, setTrackPan,
 //    addFx, removeFx, toggleFx, reorderFx, syncView
+// ✅ NEW: getPluginParams (lazy param fetch for PluginView)
 // ✅ VM snapshot includes FX truth:
 //    - fxByGuid { [fxGuid]: { guid, trackGuid, fxIndex, name, vendor, format, enabled, raw? } }
 //    - fxOrderByTrackGuid { [trackGuid]: [fxGuid, ...] }
+// ✅ NEW VM cache for params:
+//    - fxParamsByGuid { [fxGuid]: { plugin, scan, params, recommended?, roles? } }
 // ✅ Meters are telemetry-only (no seq bump)
 
 function clamp01(n) {
@@ -78,6 +82,53 @@ function uid(prefix = "id") {
   return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`;
 }
 
+// ---------------------------
+// ✅ NEW: Mock parameter manifest generator
+// - Purpose: prove end-to-end flow for PluginView (lazy fetch on PARAMS click)
+// - Shape mirrors your Lua manifests (plugin/scan/params/recommended/roles)
+// - No plugin-specific logic yet (generic params only).
+// ---------------------------
+function makeGenericParamManifest({ trackGuid, fxGuid, fxName }) {
+  const count = 16;
+
+  const params = Array.from({ length: count }).map((_, i) => {
+    const value01 = clamp01(0.15 + i * (0.7 / Math.max(1, count - 1)));
+    return {
+      idx: i,
+      name: `Param ${i + 1}`,
+      nameNorm: `param ${i + 1}`,
+      value01,
+      fmt: value01.toFixed(2),
+    };
+  });
+
+  // "recommended" = first 8 by default (UI can render this list preferentially)
+  const recommended = params.slice(0, 8).map((p) => ({
+    idx: p.idx,
+    name: p.name,
+    score: 10,
+    reason: "mock generic",
+    confidence: 0.25,
+  }));
+
+  return {
+    plugin: {
+      trackGuid: canonicalTrackGuid(trackGuid),
+      fxGuid: asStr(fxGuid, ""),
+      fxName: asStr(fxName, "Plugin"),
+      paramCount: params.length,
+    },
+    scan: {
+      safeProbe: false,
+      paramsIncluded: params.length,
+      filter: "generic_mock_params",
+    },
+    roles: {},
+    recommended,
+    params,
+  };
+}
+
 export function createMockTransportContractDocs() {
   return {
     ViewModel: {
@@ -107,6 +158,9 @@ export function createMockTransportContractDocs() {
       // ✅ FX truth (new)
       fxByGuid: {},
       fxOrderByTrackGuid: {},
+
+      // ✅ FX params cache (new)
+      fxParamsByGuid: {},
     },
 
     Syscalls: [
@@ -121,6 +175,8 @@ export function createMockTransportContractDocs() {
       "removeFx",
       "toggleFx",
       "reorderFx",
+      "getPluginParams",
+      "setParamValue",
     ],
 
     Telemetry: ["subscribeMeters"],
@@ -165,10 +221,10 @@ export function createMockTransport() {
     },
 
     busMix: {
-      FX_1: { vol: 0.80 },
-      FX_2: { vol: 0.80 },
-      FX_3: { vol: 0.80 },
-      FX_4: { vol: 0.80 },
+      FX_1: { vol: 0.8 },
+      FX_2: { vol: 0.8 },
+      FX_3: { vol: 0.8 },
+      FX_4: { vol: 0.8 },
     },
 
     tracks: [
@@ -206,9 +262,12 @@ export function createMockTransport() {
       FX_4: { l: 0.05, r: 0.04 },
     },
 
-    // ✅ FX truth (new)
+    // ✅ FX truth
     fxByGuid: {},
     fxOrderByTrackGuid: {},
+
+    // ✅ NEW: FX params cache (truth-ish)
+    fxParamsByGuid: {},
 
     // legacy debug fields (safe to keep)
     fxEnabledByGuid: {},
@@ -318,6 +377,10 @@ export function createMockTransport() {
     const nextFxByGuid = { ...(vm.fxByGuid || {}) };
     delete nextFxByGuid[guid];
 
+    // Also clear any cached params for that FX instance
+    const nextFxParamsByGuid = { ...(vm.fxParamsByGuid || {}) };
+    delete nextFxParamsByGuid[guid];
+
     vm = {
       ...vm,
       fxByGuid: nextFxByGuid,
@@ -325,6 +388,7 @@ export function createMockTransport() {
         ...(vm.fxOrderByTrackGuid || {}),
         [tg]: nextOrder,
       },
+      fxParamsByGuid: nextFxParamsByGuid,
     };
 
     // reindex remaining
@@ -624,6 +688,82 @@ export function createMockTransport() {
         return { ok: true };
       }
 
+      // ---------------------------
+      // ✅ NEW: FX params fetch (lazy)
+      // Accepts:
+      //  - { name:"getPluginParams", trackGuid, fxGuid }
+      //
+      // Contract:
+      //  - Updates truth cache: vm.fxParamsByGuid[fxGuid] = manifest
+      //  - Bumps seq + emit (so PluginView can render from store truth)
+      // ---------------------------
+      if (c.name === "getPluginParams") {
+        const trackGuid = canonicalTrackGuid(c.trackGuid || c.trackId || "");
+        const fxGuid = asStr(c.fxGuid, "");
+        if (!trackGuid) return { ok: false, error: "missing trackGuid" };
+        if (!fxGuid) return { ok: false, error: "missing fxGuid" };
+
+        const fx = vm.fxByGuid?.[fxGuid];
+        if (!fx) return { ok: false, error: `fx not found: ${fxGuid}` };
+
+        // ✅ IMPORTANT: use the FX truth name/vendor/format
+        // and generate ONLY 8 params max
+        const manifest = makeMockParamManifestForFx({
+          id: fxGuid,
+          guid: fxGuid,
+          trackGuid,
+          name: fx.name,
+          vendor: fx.vendor,
+          format: fx.format,
+        });
+
+        bumpSeq();
+
+        vm = {
+          ...vm,
+          fxParamsByGuid: {
+            ...(vm.fxParamsByGuid || {}),
+            [fxGuid]: manifest,
+          },
+        };
+
+        emit();
+        return { ok: true };
+      }
+      if (c.name === "setParamValue") {
+        const fxGuid = asStr(c.fxGuid, "");
+        const paramIdx = Number(c.paramIdx);
+        const value01 = clamp01(c.value01 ?? c.value);
+
+        if (!fxGuid) return { ok: false, error: "missing fxGuid" };
+        if (!Number.isFinite(paramIdx)) return { ok: false, error: "missing paramIdx" };
+
+        const hit = vm.fxParamsByGuid?.[fxGuid];
+        if (!hit) return { ok: false, error: `missing fx params cache: ${fxGuid}` };
+
+        const params = Array.isArray(hit.params) ? hit.params.slice() : [];
+        const i = params.findIndex((p) => Number(p?.idx) === paramIdx);
+        if (i < 0) return { ok: false, error: `param not found: idx=${paramIdx}` };
+
+        const prev = params[i] || {};
+        params[i] = {
+          ...prev,
+          value01,
+          fmt: prev?.fmtSamples ? prev.fmt : (value01 * 100).toFixed(1), // keep simple for now
+        };
+
+        bumpSeq();
+        vm = {
+          ...vm,
+          fxParamsByGuid: {
+            ...(vm.fxParamsByGuid || {}),
+            [fxGuid]: { ...hit, params },
+          },
+        };
+
+        emit();
+        return { ok: true };
+      }
       // ---------------------------
       // View sync
       // ---------------------------

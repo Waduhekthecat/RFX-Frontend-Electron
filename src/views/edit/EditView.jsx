@@ -323,6 +323,11 @@ function TrackDetailCard({ trackGuid, intent }) {
   }
 
   function goParams(fxId) {
+    intent?.({
+      name: "getPluginParams",
+      trackGuid: tg,
+      fxGuid: fxId,
+    })
     nav(`/edit/plugin/${encodeURIComponent(tg)}/${encodeURIComponent(fxId)}`);
   }
 

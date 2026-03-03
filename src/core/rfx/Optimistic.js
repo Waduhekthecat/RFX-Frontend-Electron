@@ -169,7 +169,24 @@ export function buildOptimistic(state, intent) {
 
       return { track: patch };
     }
+    case "setParamValue": {
+      const fxGuid = String(intent?.fxGuid || "");
+      const paramIdx = Number(intent?.paramIdx);
+      const value01 = Number(intent?.value01 ?? intent?.value);
 
+      if (!fxGuid) return null;
+      if (!Number.isFinite(paramIdx)) return null;
+
+      const v01 = Math.max(0, Math.min(1, Number.isFinite(value01) ? value01 : 0));
+
+      return {
+        fxParamsByGuid: {
+          [fxGuid]: {
+            [paramIdx]: { value01: v01 },
+          },
+        },
+      };
+    }
     case "selectActiveBus":
     default:
       return null;
