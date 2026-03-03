@@ -1,6 +1,8 @@
+// src/views/edit/EditView.jsx
 import React from "react";
 import { useNavigate, Outlet, useLocation } from "react-router-dom";
 import { useTransport } from "../../core/transport/TransportProvider";
+import { useRfxStore } from "../../core/rfx/Store";
 import { uid } from "../../core/rfx/Util";
 import { useIntent } from "../../core/useIntent";
 import { Panel, Inset } from "../../components/ui/Panel";
@@ -16,6 +18,14 @@ function useVM() {
   const [vm, setVm] = React.useState(() => t.getSnapshot());
   React.useEffect(() => t.subscribe(setVm), [t]);
   return vm;
+}
+
+// ---------------------------
+// Canonical IDs
+// ---------------------------
+// FX_1_A -> FX_1A (and FX_12_B -> FX_12B)
+function canonicalTrackGuid(id) {
+  return String(id || "").replace(/^([A-Za-z]+_\d+)_([ABC])$/, "$1$2");
 }
 
 // ---------------------------
@@ -164,6 +174,8 @@ function PluginCard({
   onRemove,
   onParams,
 }) {
+  const subtitle = [fx.vendor, fx.format].filter(Boolean).join(" • ") || "Unknown";
+
   return (
     <div
       draggable={canDrag}
@@ -181,12 +193,8 @@ function PluginCard({
       <div className="flex-1 min-w-0 py-0.5">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <div className="text-[14px] font-semibold leading-tight truncate">
-              {fx.name}
-            </div>
-            <div className="text-[11px] text-white/45 leading-tight truncate">
-              {fx.vendor}
-            </div>
+            <div className="text-[14px] font-semibold leading-tight truncate">{fx.name}</div>
+            <div className="text-[11px] text-white/45 leading-tight truncate">{subtitle}</div>
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
@@ -223,67 +231,85 @@ function PluginCard({
   );
 }
 
-/**
- * TrackDetailCard
- * - Still local-only chain for now
- * - BUT: toggle/reorder are now wired to intents (so pipeline is exercised)
- */
+// ---------------------------
+// TrackDetailCard
+// - ✅ Renders from Core truth (Store entities + overlay)
+// - No local chain state (so navigation won't wipe your FX)
+// ---------------------------
+const EMPTY_ORDER = Object.freeze([]);
+
 function TrackDetailCard({ trackGuid, intent }) {
   const nav = useNavigate();
 
-  const [chainsByTrack, setChainsByTrack] = React.useState(() => ({}));
-  const chain = chainsByTrack[trackGuid] || [];
+  // Always canonicalize at boundary
+  const tg = React.useMemo(() => canonicalTrackGuid(trackGuid), [trackGuid]);
+
+  // ✅ Stable selector fallback (NO fresh [] per render)
+  const order = useRfxStore(
+    React.useCallback(
+      (s) =>
+        s.ops.overlay.fxOrderByTrackGuid?.[tg] ??
+        s.entities.fxOrderByTrackGuid?.[tg] ??
+        EMPTY_ORDER,
+      [tg]
+    )
+  );
+
+  const fxByGuid = useRfxStore((s) => s.entities.fxByGuid);
+  const fxOverlay = useRfxStore((s) => s.ops.overlay.fx);
+
+  // ✅ Derived chain (memoized)
+  const chain = React.useMemo(() => {
+    const out = [];
+    for (const fxGuid of order || EMPTY_ORDER) {
+      const base = fxByGuid?.[fxGuid];
+      if (!base) continue;
+      const patch = fxOverlay?.[fxGuid];
+      const fx = patch ? { ...base, ...patch } : base;
+
+      // Optional tombstone support (removeFx optimistic)
+      if (fx?.removed) continue;
+
+      out.push({
+        id: fxGuid,
+        name: String(fx.name || "Plugin"),
+        vendor: String(fx.vendor || "").trim() || "Unknown",
+        format: String(fx.format || "").trim() || "",
+        enabled: fx.enabled !== false,
+      });
+    }
+    return out;
+  }, [order, fxByGuid, fxOverlay]);
+
   const dragSrcIdRef = React.useRef(null);
 
-  React.useEffect(() => {
-    setChainsByTrack((prev) => {
-      if (prev[trackGuid]) return prev;
-      return { ...prev, [trackGuid]: [] };
-    });
-  }, [trackGuid]);
-
-  function setChain(next) {
-    setChainsByTrack((prev) => ({ ...prev, [trackGuid]: next }));
-  }
-
   function addFromInstalled(picked) {
-    setChainsByTrack((prev) => {
-      const cur = prev[trackGuid] || [];
-      if (cur.length >= PLUGIN_MAX) return prev;
+    if (!picked) return;
+    if (chain.length >= PLUGIN_MAX) return;
 
-      const nextFx = {
-        id: uid("fx"),
-        pluginId: picked?.id,
-        raw: picked?.raw,
-        vendor: String(picked?.vendor || "").trim() || "Unknown",
-        name: String(picked?.name || picked?.raw || "Plugin").trim(),
-        enabled: true,
-      };
+    const nextFxGuid = uid("fx");
+    const fxName = String(picked?.name || picked?.raw || "Plugin").trim() || "Plugin";
 
-      const next = [...cur, nextFx];
-      return { ...prev, [trackGuid]: next };
+    intent?.({
+      name: "addFx",
+      trackGuid: tg, // ✅ canonical
+      fxGuid: nextFxGuid,
+      fxName,
+      fxVendor: picked?.vendor,
+      fxFormat: picked?.format || picked?.kind,
+      raw: picked?.raw,
+      enabled: true,
     });
-
-    // later: addFx syscall (when backend owns truth)
-    console.log("add fx", { trackGuid, picked });
   }
 
   function toggleFx(fxId) {
     const fx = chain.find((x) => x.id === fxId);
     const nextEnabled = fx ? !fx.enabled : true;
-
-    setChain(
-      chain.map((x) => (x.id === fxId ? { ...x, enabled: !x.enabled } : x))
-    );
-
-    // ✅ Wire syscall (backend accepts, seq bumps)
     intent?.({ name: "toggleFx", fxGuid: fxId, value: nextEnabled });
   }
 
   function removeFx(fxId) {
-    setChain(chain.filter((x) => x.id !== fxId));
-    // later: removeFx syscall
-    console.log("remove fx", { trackGuid, fxId });
+    intent?.({ name: "removeFx", fxGuid: fxId, trackGuid: tg }); // ✅ canonical
   }
 
   function reorderFx(srcId, dstId) {
@@ -293,17 +319,11 @@ function TrackDetailCard({ trackGuid, intent }) {
     const dstIdx = chain.findIndex((x) => x.id === dstId);
     if (srcIdx < 0 || dstIdx < 0) return;
 
-    const next = chain.slice();
-    const [moved] = next.splice(srcIdx, 1);
-    next.splice(dstIdx, 0, moved);
-    setChain(next);
-
-    // ✅ Wire syscall (backend accepts, seq bumps)
-    intent?.({ name: "reorderFx", trackGuid, fromIndex: srcIdx, toIndex: dstIdx });
+    intent?.({ name: "reorderFx", trackGuid: tg, fromIndex: srcIdx, toIndex: dstIdx }); // ✅ canonical
   }
 
   function goParams(fxId) {
-    nav(`/edit/plugin/${encodeURIComponent(trackGuid)}/${encodeURIComponent(fxId)}`);
+    nav(`/edit/plugin/${encodeURIComponent(tg)}/${encodeURIComponent(fxId)}`);
   }
 
   function onDragStart(e, fxId) {
@@ -315,10 +335,12 @@ function TrackDetailCard({ trackGuid, intent }) {
       // ignore
     }
   }
+
   function onDragOver(e) {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
   }
+
   function onDrop(e, dstId) {
     e.preventDefault();
 
@@ -344,25 +366,19 @@ function TrackDetailCard({ trackGuid, intent }) {
         <div className="grid grid-cols-12 gap-3 h-full min-h-0">
           {/* LEFT: Chain */}
           <Inset className="col-span-7 h-full min-h-0 p-3 flex flex-col gap-3">
-            {/* ✅ NEW: Mix controls row (left column only) */}
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center justify-between gap-3">
-                <div className="text-[14px] font-semibold tracking-wide text-white">
-                  {trackGuid.replace(/_(?=[A-Z]$)/, "")}
-                </div>
-
-                {/* Your TrackMixControls stays here */}
+                <div className="text-[14px] font-semibold tracking-wide text-white">{tg}</div>
               </div>
 
               <div className="flex items-center gap-2">
-                {/* TrackMixControls uses your shared Slider control */}
-                <TrackMixControls trackGuid={trackGuid} />
+                {/* ✅ Mix controls should also use canonical trackGuid */}
+                <TrackMixControls trackGuid={tg} />
               </div>
             </div>
 
             <div className="h-px bg-white/10" />
 
-            {/* ✅ PLUGINS header moved down */}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <div className="text-[11px] font-semibold tracking-wide text-white/70">
@@ -407,7 +423,7 @@ function TrackDetailCard({ trackGuid, intent }) {
             </div>
           </Inset>
 
-          {/* RIGHT: Installed plugins (UNCHANGED) */}
+          {/* RIGHT: Installed plugins */}
           <div className="col-span-5 h-full min-h-0">
             <InstalledFxShell
               className="h-full"
@@ -468,7 +484,8 @@ export function EditView() {
     intent({ name: "setRoutingMode", busId: bus.id, mode: m });
   }
 
-  const trackGuid = `${bus.id}_${lane}`;
+  // NOTE: historically UI used underscore lane; TrackDetailCard canonicalizes
+  const uiTrackGuid = `${bus.id}_${lane}`;
 
   return (
     <div className="h-full w-full p-3 min-h-0">
@@ -490,7 +507,7 @@ export function EditView() {
 
             <div className="flex items-center gap-2">
               {/* ✅ BUS volume only (stays in header) */}
-              <BusMixControls busId={bus.id} intent={intent} />
+              <BusMixControls busId={bus.id} />
 
               <div className="h-6 w-px bg-white/10 mx-1" />
 
@@ -503,7 +520,7 @@ export function EditView() {
         </Panel>
 
         <div className="flex-1 min-h-0">
-          <TrackDetailCard trackGuid={trackGuid} intent={intent} />
+          <TrackDetailCard trackGuid={uiTrackGuid} intent={intent} />
         </div>
       </div>
     </div>

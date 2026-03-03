@@ -7,6 +7,9 @@ import { uid, nowMs } from "./Util";
 
 const MAX_EVENT_LOG = 300;
 
+// ✅ Stable empty refs to avoid useSyncExternalStore infinite-loop traps
+const EMPTY_ARR = Object.freeze([]);
+
 // ---------------------------
 // Event log helpers
 // ---------------------------
@@ -63,6 +66,7 @@ function mergeOverlay(base, patch) {
   if (!patch) return base;
   return {
     track: { ...(base.track || {}), ...(patch.track || {}) },
+    bus: { ...(base.bus || {}), ...(patch.bus || {}) }, // ✅ ADD
     fx: { ...(base.fx || {}), ...(patch.fx || {}) },
     fxOrderByTrackGuid: {
       ...(base.fxOrderByTrackGuid || {}),
@@ -113,6 +117,8 @@ export const useRfxStore = create((set, get) => ({
     schema: "none",
     ts: 0,
     receivedAtMs: 0,
+    trackMix: {},
+    busMix: {},
   },
 
   reaper: { version: "unknown", resourcePath: "" },
@@ -168,6 +174,7 @@ export const useRfxStore = create((set, get) => ({
     pendingOrder: [],
     overlay: {
       track: {},
+      bus: {},
       fx: {},
       fxOrderByTrackGuid: {},
     },
@@ -207,12 +214,13 @@ export const useRfxStore = create((set, get) => ({
     return patch ? { ...base, ...patch } : base;
   },
 
+  // ✅ IMPORTANT: never return a fresh [] (causes useSyncExternalStore loops)
   selectFxOrderEffective: (trackGuid) => {
     const st = get();
     return (
       st.ops.overlay.fxOrderByTrackGuid[trackGuid] ||
       st.entities.fxOrderByTrackGuid[trackGuid] ||
-      []
+      EMPTY_ARR
     );
   },
 
@@ -298,9 +306,7 @@ export const useRfxStore = create((set, get) => ({
 
     set((s) => ({
       snapshot: {
-        seq: norm.snapshot.seq,
-        schema: norm.snapshot.schema,
-        ts: norm.snapshot.ts,
+        ...norm.snapshot,     // ✅ preserves trackMix + busMix (and any other future fields)
         receivedAtMs,
       },
       reaper: norm.reaper,
@@ -313,16 +319,16 @@ export const useRfxStore = create((set, get) => ({
       // not from snapshot normalization. Snapshot is truth state.
       perf: norm.perf
         ? {
-            buses: norm.perf.buses,
-            activeBusId: norm.perf.activeBusId,
-            busModesById:
-              norm.perf.busModesById ?? norm.perf.routingModesById ?? null,
-            metersById: s.meters.byId || s.perf.metersById || null,
-          }
+          buses: norm.perf.buses,
+          activeBusId: norm.perf.activeBusId,
+          busModesById:
+            norm.perf.busModesById ?? norm.perf.routingModesById ?? null,
+          metersById: s.meters.byId || s.perf.metersById || null,
+        }
         : {
-            ...s.perf,
-            metersById: s.meters.byId || s.perf.metersById || null,
-          },
+          ...s.perf,
+          metersById: s.meters.byId || s.perf.metersById || null,
+        },
 
       session: {
         ...s.session,

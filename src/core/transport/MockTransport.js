@@ -2,7 +2,10 @@
 // Mock transport with canonical syscall contract + meters telemetry channel.
 // ✅ Includes: selectActiveBus, setRoutingMode (alias setStateMode),
 //    setBusVolume, setTrackVolume, setTrackPan,
-//    toggleFx, reorderFx, syncView
+//    addFx, removeFx, toggleFx, reorderFx, syncView
+// ✅ VM snapshot includes FX truth:
+//    - fxByGuid { [fxGuid]: { guid, trackGuid, fxIndex, name, vendor, format, enabled, raw? } }
+//    - fxOrderByTrackGuid { [trackGuid]: [fxGuid, ...] }
 // ✅ Meters are telemetry-only (no seq bump)
 
 function clamp01(n) {
@@ -37,13 +40,42 @@ function normalizeMode(m) {
 }
 
 function normBusId(x) {
-  const s = String(x || "");
-  return s;
+  return String(x || "");
+}
+
+function canonicalTrackGuid(id) {
+  // FX_1_A -> FX_1A (also FX_12_B -> FX_12B)
+  return String(id || "").replace(/^([A-Za-z]+_\d+)_([ABC])$/, "$1$2");
 }
 
 function normTrackId(x) {
-  const s = String(x || "");
-  return s;
+  return canonicalTrackGuid(String(x || ""));
+}
+
+function asStr(x, fallback = "") {
+  const s = x == null ? "" : String(x);
+  return s || fallback;
+}
+
+function moveInArray(list, fromIndex, toIndex) {
+  const a = Array.isArray(list) ? list.slice() : [];
+  if (
+    !Number.isFinite(fromIndex) ||
+    !Number.isFinite(toIndex) ||
+    fromIndex < 0 ||
+    toIndex < 0 ||
+    fromIndex >= a.length ||
+    toIndex >= a.length
+  ) {
+    return a;
+  }
+  const [moved] = a.splice(fromIndex, 1);
+  a.splice(toIndex, 0, moved);
+  return a;
+}
+
+function uid(prefix = "id") {
+  return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`;
 }
 
 export function createMockTransportContractDocs() {
@@ -72,12 +104,11 @@ export function createMockTransportContractDocs() {
 
       meters: { FX_1: { l: 0.1, r: 0.1 } },
 
-      // FX mock fields (optional, for debug)
-      fxEnabledByGuid: {},
-      fxReorderLastByTrackGuid: {},
+      // ✅ FX truth (new)
+      fxByGuid: {},
+      fxOrderByTrackGuid: {},
     },
 
-    // ✅ Canonical syscalls (plus alias)
     Syscalls: [
       "selectActiveBus",
       "setRoutingMode",
@@ -86,11 +117,12 @@ export function createMockTransportContractDocs() {
       "setTrackVolume",
       "setTrackPan",
       "syncView",
+      "addFx",
+      "removeFx",
       "toggleFx",
       "reorderFx",
     ],
 
-    // ✅ Optional telemetry channel (fast path)
     Telemetry: ["subscribeMeters"],
   };
 }
@@ -104,10 +136,6 @@ export function createMockTransportContractDocs() {
  *
  * Telemetry (optional):
  *  - subscribeMeters(cb): pushes meter frames only (NO seq)
- *
- * Dev helper (optional):
- *  - setMetersEnabled(on): pauses/resumes meter updates (does NOT affect syscalls)
- *  - getMetersEnabled(): returns boolean
  */
 export function createMockTransport() {
   let seq = 1;
@@ -129,7 +157,6 @@ export function createMockTransport() {
     ],
     activeBusId: "FX_1",
 
-    // routing mode per bus
     busModes: {
       FX_1: "linear",
       FX_2: "parallel",
@@ -137,15 +164,13 @@ export function createMockTransport() {
       FX_4: "parallel",
     },
 
-    // ✅ bus mix (0..1)
     busMix: {
-      FX_1: { vol: 0.85 },
-      FX_2: { vol: 0.75 },
-      FX_3: { vol: 0.8 },
-      FX_4: { vol: 0.78 },
+      FX_1: { vol: 0.80 },
+      FX_2: { vol: 0.80 },
+      FX_3: { vol: 0.80 },
+      FX_4: { vol: 0.80 },
     },
 
-    // ✅ tracks (simple: lane tracks per bus; UI can ignore if not used yet)
     tracks: [
       { id: "FX_1A", label: "FX_1A", busId: "FX_1", lane: "A" },
 
@@ -160,19 +185,18 @@ export function createMockTransport() {
       { id: "FX_4B", label: "FX_4B", busId: "FX_4", lane: "B" },
     ],
 
-    // ✅ track mix (vol 0..1, pan -1..1)
     trackMix: {
-      FX_1A: { vol: 0.85, pan: 0 },
+      FX_1A: { vol: 0.8, pan: 0 },
 
-      FX_2A: { vol: 0.75, pan: -0.2 },
-      FX_2B: { vol: 0.75, pan: 0.2 },
+      FX_2A: { vol: 0.8, pan: 0 },
+      FX_2B: { vol: 0.8, pan: 0 },
 
-      FX_3A: { vol: 0.8, pan: -0.4 },
+      FX_3A: { vol: 0.8, pan: 0 },
       FX_3B: { vol: 0.8, pan: 0 },
-      FX_3C: { vol: 0.8, pan: 0.4 },
+      FX_3C: { vol: 0.8, pan: 0 },
 
-      FX_4A: { vol: 0.78, pan: -0.25 },
-      FX_4B: { vol: 0.78, pan: 0.25 },
+      FX_4A: { vol: 0.8, pan: 0 },
+      FX_4B: { vol: 0.8, pan: 0 },
     },
 
     meters: {
@@ -182,7 +206,11 @@ export function createMockTransport() {
       FX_4: { l: 0.05, r: 0.04 },
     },
 
-    // FX syscall demo state (minimal)
+    // ✅ FX truth (new)
+    fxByGuid: {},
+    fxOrderByTrackGuid: {},
+
+    // legacy debug fields (safe to keep)
     fxEnabledByGuid: {},
     fxReorderLastByTrackGuid: {},
   };
@@ -203,7 +231,105 @@ export function createMockTransport() {
   function canonicalizeCall(call) {
     if (!call) return null;
     const name = call.name === "setStateMode" ? "setRoutingMode" : call.name;
-    return { ...call, name };
+
+    // Normalize boundary ids so the core never sees FX_1_A downstream.
+    const next = { ...call, name };
+
+    if (next.trackGuid != null) next.trackGuid = canonicalTrackGuid(next.trackGuid);
+    if (next.trackId != null) next.trackId = canonicalTrackGuid(next.trackId);
+    if (next.track != null) next.track = canonicalTrackGuid(next.track);
+
+    return next;
+  }
+
+  // ---------------------------
+  // FX truth helpers
+  // ---------------------------
+  function ensureFxOrder(trackGuid) {
+    const tg = canonicalTrackGuid(trackGuid);
+    const cur = vm.fxOrderByTrackGuid?.[tg];
+    if (Array.isArray(cur)) return cur;
+    return [];
+  }
+
+  function recomputeFxIndicesForTrack(trackGuid, nextOrder) {
+    const tg = canonicalTrackGuid(trackGuid);
+    const fxByGuid = { ...(vm.fxByGuid || {}) };
+
+    const order = Array.isArray(nextOrder) ? nextOrder : [];
+    for (let i = 0; i < order.length; i++) {
+      const g = order[i];
+      const fx = fxByGuid[g];
+      if (!fx) continue;
+      fxByGuid[g] = { ...fx, fxIndex: i, trackGuid: tg };
+    }
+
+    vm = {
+      ...vm,
+      fxByGuid,
+      fxOrderByTrackGuid: {
+        ...(vm.fxOrderByTrackGuid || {}),
+        [tg]: order.slice(),
+      },
+    };
+  }
+
+  function addFxToTruth({ trackGuid, fxGuid, name, vendor, format, enabled, raw }) {
+    const tg = canonicalTrackGuid(trackGuid);
+    const guid = asStr(fxGuid, "") || uid("fx");
+
+    const baseOrder = ensureFxOrder(tg);
+    const nextOrder = baseOrder.concat([guid]);
+
+    const fx = {
+      guid,
+      trackGuid: tg,
+      fxIndex: nextOrder.length - 1,
+      name: asStr(name, "Plugin"),
+      vendor: asStr(vendor, ""),
+      format: asStr(format, ""),
+      enabled: enabled !== false,
+      raw: raw ?? null,
+    };
+
+    vm = {
+      ...vm,
+      fxByGuid: {
+        ...(vm.fxByGuid || {}),
+        [guid]: fx,
+      },
+      fxOrderByTrackGuid: {
+        ...(vm.fxOrderByTrackGuid || {}),
+        [tg]: nextOrder,
+      },
+    };
+
+    return guid;
+  }
+
+  function removeFxFromTruth({ trackGuid, fxGuid }) {
+    const tg = canonicalTrackGuid(trackGuid);
+    const guid = asStr(fxGuid, "");
+    if (!guid) return false;
+
+    const baseOrder = ensureFxOrder(tg);
+    const nextOrder = baseOrder.filter((g) => g !== guid);
+
+    const nextFxByGuid = { ...(vm.fxByGuid || {}) };
+    delete nextFxByGuid[guid];
+
+    vm = {
+      ...vm,
+      fxByGuid: nextFxByGuid,
+      fxOrderByTrackGuid: {
+        ...(vm.fxOrderByTrackGuid || {}),
+        [tg]: nextOrder,
+      },
+    };
+
+    // reindex remaining
+    recomputeFxIndicesForTrack(tg, nextOrder);
+    return true;
   }
 
   // ============================
@@ -239,7 +365,6 @@ export function createMockTransport() {
     // IMPORTANT: meters do NOT bump seq
     vm = { ...vm, meters: { ...vm.meters, [id]: next } };
 
-    // Telemetry-only push
     emitMeters({
       t: Date.now(),
       activeBusId: id,
@@ -250,8 +375,7 @@ export function createMockTransport() {
 
   function startMeters() {
     if (metersTimer) return;
-    if (typeof window === "undefined" || typeof window.setInterval !== "function")
-      return;
+    if (typeof window === "undefined" || typeof window.setInterval !== "function") return;
 
     metersTimer = window.setInterval(() => {
       if (!metersEnabled) return;
@@ -259,13 +383,9 @@ export function createMockTransport() {
     }, 60);
   }
 
-  // start immediately
   startMeters();
 
   return {
-    // ---------------------------
-    // Contract
-    // ---------------------------
     async boot() {
       await sleep(600);
       await sleep(900);
@@ -285,11 +405,8 @@ export function createMockTransport() {
       return () => subs.delete(cb);
     },
 
-    // ✅ Telemetry channel for meters
     subscribeMeters(cb) {
       meterSubs.add(cb);
-
-      // Seed immediate frame so UI doesn't wait for the next interval tick
       try {
         const id = vm.activeBusId;
         if (id && vm.meters?.[id]) {
@@ -303,7 +420,6 @@ export function createMockTransport() {
       } catch {
         // ignore
       }
-
       return () => meterSubs.delete(cb);
     },
 
@@ -338,10 +454,7 @@ export function createMockTransport() {
       }
 
       // ---------------------------
-      // ✅ Bus mix
-      // supports:
-      //  - { name:"setBusVolume", busId, value }  (preferred)
-      //  - { name:"setBusVolume", busId, vol }    (compat)
+      // Bus mix
       // ---------------------------
       if (c.name === "setBusVolume") {
         const id = normBusId(c.busId);
@@ -361,12 +474,7 @@ export function createMockTransport() {
       }
 
       // ---------------------------
-      // ✅ Track mix
-      // supports:
-      //  - { name:"setTrackVolume", trackId, value } (preferred)
-      //  - { name:"setTrackVolume", trackGuid, value } (compat)
-      //  - { name:"setTrackPan",    trackId, value } (preferred; -1..1)
-      //  - { name:"setTrackPan",    trackGuid, pan } (compat)
+      // Track mix
       // ---------------------------
       if (c.name === "setTrackVolume") {
         const id = normTrackId(c.trackId ?? c.trackGuid);
@@ -403,16 +511,72 @@ export function createMockTransport() {
       }
 
       // ---------------------------
-      // FX: toggle enable/disable (minimal mock support)
+      // ✅ FX: add
+      // NOTE: DO NOT read c.name for plugin name (c.name === "addFx")
+      // Accepts:
+      //  - { name:"addFx", trackGuid, fxGuid?, fxName, fxVendor?, fxFormat?, raw?, enabled? }
+      // ---------------------------
+      if (c.name === "addFx") {
+        const trackGuid = canonicalTrackGuid(c.trackGuid || c.trackId || "");
+        if (!trackGuid) return { ok: false, error: "missing trackGuid" };
+
+        bumpSeq();
+
+        const fxGuid = asStr(c.fxGuid, "") || uid("fx");
+        const fxName = asStr(c.fxName ?? c.pluginName ?? c.title, "Plugin");
+        const fxVendor = asStr(c.fxVendor ?? c.vendor, "");
+        const fxFormat = asStr(c.fxFormat ?? c.format, "");
+        const enabled = c.enabled !== false;
+
+        const guid = addFxToTruth({
+          trackGuid,
+          fxGuid,
+          name: fxName,
+          vendor: fxVendor,
+          format: fxFormat,
+          enabled,
+          raw: c.raw ?? null,
+        });
+
+        emit();
+        return { ok: true, fxGuid: guid };
+      }
+
+      // ---------------------------
+      // ✅ FX: remove
+      // Accepts:
+      //  - { name:"removeFx", trackGuid, fxGuid }
+      // ---------------------------
+      if (c.name === "removeFx") {
+        const trackGuid = canonicalTrackGuid(c.trackGuid || c.trackId || "");
+        const fxGuid = asStr(c.fxGuid, "");
+        if (!trackGuid) return { ok: false, error: "missing trackGuid" };
+        if (!fxGuid) return { ok: false, error: "missing fxGuid" };
+
+        bumpSeq();
+        removeFxFromTruth({ trackGuid, fxGuid });
+        emit();
+        return { ok: true };
+      }
+
+      // ---------------------------
+      // ✅ FX: toggle enable/disable
       // ---------------------------
       if (c.name === "toggleFx") {
-        const fxGuid = String(c.fxGuid || "");
+        const fxGuid = asStr(c.fxGuid, "");
         const value = !!c.value;
         if (!fxGuid) return { ok: false, error: "missing fxGuid" };
+
+        const fx = vm.fxByGuid?.[fxGuid];
+        if (!fx) return { ok: false, error: `fx not found: ${fxGuid}` };
 
         bumpSeq();
         vm = {
           ...vm,
+          fxByGuid: {
+            ...(vm.fxByGuid || {}),
+            [fxGuid]: { ...fx, enabled: value },
+          },
           fxEnabledByGuid: {
             ...(vm.fxEnabledByGuid || {}),
             [fxGuid]: value,
@@ -423,10 +587,12 @@ export function createMockTransport() {
       }
 
       // ---------------------------
-      // FX: reorder request (minimal mock support)
+      // ✅ FX: reorder (truth)
+      // Accepts:
+      //  - { name:"reorderFx", trackGuid, fromIndex, toIndex }
       // ---------------------------
       if (c.name === "reorderFx") {
-        const trackGuid = String(c.trackGuid || "");
+        const trackGuid = canonicalTrackGuid(c.trackGuid || "");
         const fromIndex = Number(c.fromIndex);
         const toIndex = Number(c.toIndex);
 
@@ -435,7 +601,17 @@ export function createMockTransport() {
           return { ok: false, error: "missing fromIndex/toIndex" };
         }
 
+        const baseOrder = ensureFxOrder(trackGuid);
+        if (baseOrder.length === 0) {
+          return { ok: false, error: "no fx on track" };
+        }
+
         bumpSeq();
+
+        const nextOrder = moveInArray(baseOrder, fromIndex, toIndex);
+        recomputeFxIndicesForTrack(trackGuid, nextOrder);
+
+        // legacy debug field (optional)
         vm = {
           ...vm,
           fxReorderLastByTrackGuid: {
@@ -443,6 +619,7 @@ export function createMockTransport() {
             [trackGuid]: { fromIndex, toIndex, at: Date.now() },
           },
         };
+
         emit();
         return { ok: true };
       }
@@ -459,9 +636,6 @@ export function createMockTransport() {
       return { ok: false, error: `unknown syscall: ${String(c.name)}` };
     },
 
-    // ---------------------------
-    // ✅ Optional dev helper API
-    // ---------------------------
     setMetersEnabled(on) {
       metersEnabled = !!on;
       return { ok: true };

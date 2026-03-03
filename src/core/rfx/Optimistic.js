@@ -37,6 +37,89 @@ export function buildOptimistic(state, intent) {
       return { track: { [trackGuid]: { pan: Number(value ?? 0) } } };
     }
 
+    // ---------------------------
+    // ✅ FX: add (optimistic)
+    // ---------------------------
+    case "addFx": {
+      const trackGuid = canonicalTrackGuid(intent?.trackGuid);
+      const fxGuid = String(intent?.fxGuid || "");
+      if (!trackGuid || !fxGuid) return null;
+
+      const fxName = String(intent?.fxName || "Plugin");
+      const vendor = String(intent?.fxVendor || "");
+      const format = String(intent?.fxFormat || "");
+      const enabled = intent?.enabled !== false;
+
+      const baseOrder = state?.entities?.fxOrderByTrackGuid?.[trackGuid] || [];
+      const nextOrder = baseOrder.concat([fxGuid]);
+
+      return {
+        fx: {
+          [fxGuid]: {
+            guid: fxGuid,
+            trackGuid,
+            fxIndex: nextOrder.length - 1,
+            name: fxName,
+            vendor,
+            format,
+            enabled,
+            raw: intent?.raw ?? null,
+          },
+        },
+        fxOrderByTrackGuid: { [trackGuid]: nextOrder },
+      };
+    }
+
+    // ---------------------------
+    // ✅ FX: remove (optimistic)
+    // ---------------------------
+    case "removeFx": {
+      const trackGuid = canonicalTrackGuid(intent?.trackGuid);
+      const fxGuid = String(intent?.fxGuid || "");
+      if (!trackGuid || !fxGuid) return null;
+
+      const baseOrder = state?.entities?.fxOrderByTrackGuid?.[trackGuid] || [];
+      const nextOrder = baseOrder.filter((g) => g !== fxGuid);
+
+      // tombstone (so chain can skip it immediately)
+      return {
+        fx: { [fxGuid]: { removed: true } },
+        fxOrderByTrackGuid: { [trackGuid]: nextOrder },
+      };
+    }
+    // ---------------------------
+    // ✅ MIX: Track Volume (0..1)
+    // Supports: setVol (legacy) AND setTrackVolume (current)
+    // ---------------------------
+    case "setVol":
+    case "setTrackVolume": {
+      const trackGuid = canonicalTrackGuid(intent?.trackGuid);
+      const value = Number(intent?.value ?? 1);
+      if (!trackGuid) return null;
+      return { track: { [trackGuid]: { vol: value } } };
+    }
+
+    // ---------------------------
+    // ✅ MIX: Track Pan (-1..+1)
+    // Supports: setPan (legacy) AND setTrackPan (current)
+    // ---------------------------
+    case "setPan":
+    case "setTrackPan": {
+      const trackGuid = canonicalTrackGuid(intent?.trackGuid);
+      const value = Number(intent?.value ?? 0);
+      if (!trackGuid) return null;
+      return { track: { [trackGuid]: { pan: value } } };
+    }
+
+    // ---------------------------
+    // ✅ MIX: Bus Volume (0..1)
+    // ---------------------------
+    case "setBusVolume": {
+      const busId = String(intent?.busId || "");
+      const value = Number(intent?.value ?? 1);
+      if (!busId) return null;
+      return { bus: { [busId]: { vol: value } } };
+    }
     case "toggleFx": {
       const { fxGuid, value } = intent || {};
       if (!fxGuid) return null;
@@ -44,7 +127,8 @@ export function buildOptimistic(state, intent) {
     }
 
     case "reorderFx": {
-      const { trackGuid, fromIndex, toIndex } = intent || {};
+      const trackGuid = canonicalTrackGuid(intent?.trackGuid);
+      const { fromIndex, toIndex } = intent || {};
       if (!trackGuid) return null;
 
       const order = state.entities.fxOrderByTrackGuid[trackGuid] || [];
@@ -65,14 +149,12 @@ export function buildOptimistic(state, intent) {
       return { fxOrderByTrackGuid: { [trackGuid]: next } };
     }
 
-    // ✅ NEW: setRoutingMode(busId, mode) arms lanes (A/B/C)
-    // This is how routing mode is “stored” in REAPER.
     case "setRoutingMode": {
       const { busId, mode } = intent || {};
       if (!busId) return null;
 
-      const lanes = findLaneGuidsForBus(state, busId); // {A,B,C} -> guid or null
-      if (!lanes.A && !lanes.B && !lanes.C) return null; // probably mock VM mode
+      const lanes = findLaneGuidsForBus(state, busId);
+      if (!lanes.A && !lanes.B && !lanes.C) return null;
 
       const want = normalizeMode(mode);
 
@@ -88,11 +170,14 @@ export function buildOptimistic(state, intent) {
       return { track: patch };
     }
 
-    // ✅ selectActiveBus has no optimistic overlay (it changes INPUT sends in REAPER)
     case "selectActiveBus":
     default:
       return null;
   }
+}
+
+function canonicalTrackGuid(id) {
+  return String(id || "").replace(/^([A-Za-z]+_\d+)_([ABC])$/, "$1$2");
 }
 
 function normalizeMode(m) {

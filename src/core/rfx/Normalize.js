@@ -1,24 +1,5 @@
 // src/core/rfx/Normalize.js
-/**
- * normalize(view)
- *
- * Supports TWO input shapes:
- *  1) REAPER snapshot: { schema, seq, ts, reaper, project, selection, transport, session, tracks: [...] }
- *  2) VM-style snapshot (Mock/Electron backend): { buses, activeBusId, busModes/routingModes, meters, schema?, seq?, ts? }
- *
- * Always returns:
- * {
- *   snapshot, reaper, project, selection, transportState,
- *   session: { activeBusId },
- *   entities: { tracksByGuid, trackOrder, fxByGuid, fxOrderByTrackGuid, routesById, routeIdsByTrackGuid },
- *   perf: { buses, activeBusId, busModesById } | null
- * }
- *
- * Notes:
- * - Meters are telemetry and should NOT be treated as seq-bearing truth.
- *   (Store ingests meters via ingestMeters and mirrors into perf.metersById for compatibility.)
- * - Buses are NOT mapped into entities.tracksByGuid (keeps "bus" separate from "track").
- */
+// (This is your same file, only the VM branch entities mapping is corrected.)
 
 function asStr(x, fallback = "") {
   const s = x == null ? "" : String(x);
@@ -45,14 +26,11 @@ export function normalize(view) {
     const buses = v.buses || [];
     const activeBusId = asStr(v.activeBusId, "");
 
-    // accept either key
     const busModesById =
       (v.busModes && typeof v.busModes === "object" && v.busModes) ||
       (v.routingModes && typeof v.routingModes === "object" && v.routingModes) ||
       {};
 
-    // For VM-only mode, entities are empty; perf holds the bus world.
-    // selection index is "active bus index" so UI that keys off selection can still work.
     const selectedTrackIndex = buses.findIndex(
       (b) => asStr(b?.id, "") === activeBusId
     );
@@ -63,12 +41,10 @@ export function normalize(view) {
         schema: asStr(v.schema, "mock_vm"),
         ts: asNum(v.ts, 0),
 
-        // ✅ QUICK PASS-THROUGH FOR MOCK MIX STATE
-        trackMix: (v.trackMix && typeof v.trackMix === "object") ? v.trackMix : {},
-        busMix: (v.busMix && typeof v.busMix === "object") ? v.busMix : {},
+        trackMix: v.trackMix && typeof v.trackMix === "object" ? v.trackMix : {},
+        busMix: v.busMix && typeof v.busMix === "object" ? v.busMix : {},
       },
 
-      // These are placeholders until REAPER backend provides real values
       reaper: { version: "mock", resourcePath: "" },
       project: { name: "Mock", path: "", templateVersion: "mock" },
 
@@ -85,8 +61,14 @@ export function normalize(view) {
       entities: {
         tracksByGuid: {},
         trackOrder: [],
-        fxByGuid: {},
-        fxOrderByTrackGuid: {},
+
+        // ✅ FIX: map VM FX truth into entities so Reconcile can verify
+        fxByGuid: (v.fxByGuid && typeof v.fxByGuid === "object") ? v.fxByGuid : {},
+        fxOrderByTrackGuid:
+          (v.fxOrderByTrackGuid && typeof v.fxOrderByTrackGuid === "object")
+            ? v.fxOrderByTrackGuid
+            : {},
+
         routesById: {},
         routeIdsByTrackGuid: {},
       },
@@ -95,13 +77,12 @@ export function normalize(view) {
         buses,
         activeBusId,
         busModesById,
-        // metersById intentionally omitted (telemetry handles it)
       },
     };
   }
 
   // -----------------------------
-  // Case B: REAPER snapshot
+  // Case B: REAPER snapshot (unchanged)
   // -----------------------------
   const schema = asStr(v.schema, "unknown");
   const seq = asNum(v.seq, 0);
@@ -180,7 +161,6 @@ export function normalize(view) {
 
     trackOrder.push(guid);
 
-    // FX
     const fxArr = Array.isArray(tr?.fx) ? tr.fx : [];
     const fxGuids = [];
 
@@ -202,7 +182,6 @@ export function normalize(view) {
 
     fxOrderByTrackGuid[guid] = fxGuids;
 
-    // Routing edges
     const sends = Array.isArray(tr?.routing?.sends) ? tr.routing.sends : [];
     const receives = Array.isArray(tr?.routing?.receives)
       ? tr.routing.receives
@@ -226,7 +205,6 @@ export function normalize(view) {
     routeIdsByTrackGuid[guid] = { sends: sendIds, receives: recvIds };
   }
 
-  // Ensure stable order by trackIndex
   trackOrder.sort(
     (a, b) =>
       (tracksByGuid[a]?.trackIndex ?? 0) - (tracksByGuid[b]?.trackIndex ?? 0)
@@ -247,7 +225,7 @@ export function normalize(view) {
       routesById,
       routeIdsByTrackGuid,
     },
-    perf: null, // REAPER snapshots can optionally add perf later; safe to keep null now
+    perf: null,
   };
 }
 

@@ -34,12 +34,19 @@ function v(ok, reason) {
   };
 }
 
+function canonicalTrackGuid(id) {
+  const s = String(id || "");
+  // FX_1_A -> FX_1A (also FX_12_B -> FX_12B)
+  return s.replace(/^([A-Za-z]+_\d+)_([ABC])$/, "$1$2");
+}
+
 export function reconcilePending(prevState, norm) {
   const now = Date.now();
 
   const pendingOrder = prevState?.ops?.pendingOrder || [];
   const pendingById = prevState?.ops?.pendingById || {};
   const prevOverlay = prevState?.ops?.overlay || {
+    bus: {},
     track: {},
     fx: {},
     fxOrderByTrackGuid: {},
@@ -73,7 +80,11 @@ export function reconcilePending(prevState, norm) {
           checkedSeq,
         },
       };
-      overlay = clearOverlayForOp(overlay, op);
+
+      // ✅ IMPORTANT:
+      // Do NOT clear overlay for superseded ops.
+      // Overlay is keyed by trackGuid/busId, so clearing here would also wipe
+      // the optimistic patch for the *newer* op that replaced it.
       continue;
     }
 
@@ -101,8 +112,6 @@ export function reconcilePending(prevState, norm) {
     }
 
     // ✅ Ensure verify is written on EVERY reconcile attempt for sent ops.
-    // If the seq hasn't advanced (and we already have a seq), we can't assert,
-    // but we still provide a consistent reason.
     if (op.status === "sent" && !seqAdvanced && prevSeq !== 0) {
       nextPendingById[opId] = {
         ...op,
@@ -116,7 +125,7 @@ export function reconcilePending(prevState, norm) {
       continue;
     }
 
-    // For queued ops, we generally don't assert. Keep existing behavior.
+    // For queued ops, we generally don't assert.
     if (op.status !== "sent") {
       nextPendingOrder.push(opId);
       continue;
@@ -156,11 +165,7 @@ export function reconcilePending(prevState, norm) {
     },
   };
 }
-function canonLaneId(id) {
-  const s = String(id || "");
-  // FX_1_A -> FX_1A (also FX_12_B -> FX_12B)
-  return s.replace(/^([A-Za-z]+_\d+)_([ABC])$/, "$1$2");
-}
+
 /**
  * Returns { ok, reason } instead of boolean.
  * Reasons are standardized for CoreInspector readability.
@@ -243,7 +248,6 @@ function opVerifySnapshot(op, norm) {
 
     // ---------------------------
     // ✅ Buffered / RFX-named continuous controls
-    // Emitted by useIntentBuffered.
     // For MOCK: verify against snapshot.trackMix / snapshot.busMix.
     // ---------------------------
 
@@ -251,10 +255,9 @@ function opVerifySnapshot(op, norm) {
       const { trackGuid, value } = intent;
       if (!trackGuid) return v(false, "missing trackGuid");
 
-      // MOCK VM: check snapshot.trackMix[trackGuid].vol
       if (isMockVm(norm)) {
         const mix = norm?.snapshot?.trackMix || {};
-        const tg = canonLaneId(trackGuid);
+        const tg = canonicalTrackGuid(trackGuid);
         const got = Number(mix[tg]?.vol);
         const want = Number(value);
         if (!Number.isFinite(got) || !Number.isFinite(want)) {
@@ -265,7 +268,6 @@ function opVerifySnapshot(op, norm) {
           : v(false, `mock track vol mismatch: want ≈${want} got ${got}`);
       }
 
-      // REAL VM fallback: if you normalize these into track entities later, this will work.
       const tr = tracksByGuid[trackGuid];
       if (!tr) return v(false, `track missing: ${trackGuid}`);
       const got = Number(tr.vol);
@@ -282,10 +284,9 @@ function opVerifySnapshot(op, norm) {
       const { trackGuid, value } = intent;
       if (!trackGuid) return v(false, "missing trackGuid");
 
-      // MOCK VM: check snapshot.trackMix[trackGuid].pan
       if (isMockVm(norm)) {
         const mix = norm?.snapshot?.trackMix || {};
-        const tg = canonLaneId(trackGuid);
+        const tg = canonicalTrackGuid(trackGuid);
         const got = Number(mix[tg]?.pan);
         const want = Number(value);
         if (!Number.isFinite(got) || !Number.isFinite(want)) {
@@ -296,7 +297,6 @@ function opVerifySnapshot(op, norm) {
           : v(false, `mock track pan mismatch: want ≈${want} got ${got}`);
       }
 
-      // REAL VM fallback
       const tr = tracksByGuid[trackGuid];
       if (!tr) return v(false, `track missing: ${trackGuid}`);
       const got = Number(tr.pan);
@@ -313,7 +313,6 @@ function opVerifySnapshot(op, norm) {
       const { busId, value } = intent;
       if (!busId) return v(false, "missing busId");
 
-      // MOCK VM: check snapshot.busMix[busId].vol
       if (isMockVm(norm)) {
         const got = Number(norm?.snapshot?.busMix?.[busId]?.vol);
         const want = Number(value);
@@ -325,8 +324,38 @@ function opVerifySnapshot(op, norm) {
           : v(false, `mock bus vol mismatch: want ≈${want} got ${got}`);
       }
 
-      // REAL VM: you can wire later once bus mix exists in entities
       return v(false, "setBusVolume verifier not wired for real VM yet");
+    }
+
+    // ---------------------------
+    // ✅ FX verifiers (Option B)
+    // ---------------------------
+
+    case "addFx": {
+      const { trackGuid, fxGuid } = intent || {};
+      const tg = canonicalTrackGuid(trackGuid);
+      if (!tg) return v(false, "missing trackGuid");
+      if (!fxGuid) return v(false, "missing fxGuid");
+
+      const fx = fxByGuid[fxGuid];
+      if (!fx) return v(false, `fx missing: ${fxGuid}`);
+
+      const order = fxOrderByTrackGuid[tg] || [];
+      const inOrder = order.includes(fxGuid);
+      const trackOk = canonicalTrackGuid(fx.trackGuid) === tg;
+
+      return inOrder && trackOk ? v(true, REASONS.OK) : v(false, "addFx not reflected in truth");
+    }
+
+    case "removeFx": {
+      const { fxGuid } = intent || {};
+      if (!fxGuid) return v(false, "missing fxGuid");
+
+      const fx = fxByGuid[fxGuid];
+      if (fx) return v(false, "removeFx not reflected in truth (fx still present)");
+
+      // If it's gone from fxByGuid, that's enough for now.
+      return v(true, REASONS.OK);
     }
 
     case "toggleFx": {
@@ -345,16 +374,18 @@ function opVerifySnapshot(op, norm) {
       const { trackGuid, fromIndex, toIndex } = intent;
       if (!trackGuid) return v(false, "missing trackGuid");
 
+      const tg = canonicalTrackGuid(trackGuid);
+
       const expected = expectedFxOrderFromIntentOrOptimistic(
         op,
         fxOrderByTrackGuid,
-        trackGuid,
+        tg,
         fromIndex,
         toIndex
       );
       if (!expected) return v(false, "fx order: could not compute expected order");
 
-      const actual = fxOrderByTrackGuid[trackGuid] || [];
+      const actual = fxOrderByTrackGuid[tg] || [];
       return arrayEqual(actual, expected)
         ? v(true, REASONS.OK)
         : v(false, "fx order mismatch");
@@ -366,7 +397,6 @@ function opVerifySnapshot(op, norm) {
       if (!busId) return v(false, "missing busId");
       const want = normalizeMode(mode);
 
-      // MOCK VM verification: check perf busModesById
       if (isMockVm(norm)) {
         const got = normalizeMode(
           norm?.perf?.busModesById?.[busId] ??
@@ -378,7 +408,6 @@ function opVerifySnapshot(op, norm) {
           : v(false, REASONS.BUS_MODE_MISMATCH(want, got));
       }
 
-      // REAL REAPER verification: lane recArm state
       const lanes = findLaneGuidsForBusByName(tracksByGuid, busId);
 
       const wantA = want === "linear" || want === "parallel" || want === "lcr";
@@ -418,7 +447,6 @@ function opVerifySnapshot(op, norm) {
       const { busId } = intent || {};
       if (!busId) return v(false, "missing busId");
 
-      // MOCK VM verification (no INPUT/routes)
       if (isMockVm(norm)) {
         const got = String(norm?.session?.activeBusId || norm?.perf?.activeBusId || "");
         return got === busId
@@ -429,7 +457,6 @@ function opVerifySnapshot(op, norm) {
       const gotActive = String(norm?.session?.activeBusId || "");
       if (gotActive !== busId) return v(false, REASONS.ACTIVE_BUS_MISMATCH(busId, gotActive));
 
-      // REAL REAPER verification
       let inputGuid = null;
       try {
         inputGuid = mustFindInputTrackGuidByName(tracksByGuid);
@@ -450,7 +477,6 @@ function opVerifySnapshot(op, norm) {
     }
 
     case "syncView":
-      // syncView doesn't assert state changes; it just requests the latest snapshot.
       return v(true, "syncView (no state assertion)");
 
     default:
@@ -487,11 +513,13 @@ function expectedFxOrderFromIntentOrOptimistic(
   fromIndex,
   toIndex
 ) {
+  const tg = canonicalTrackGuid(trackGuid);
+
   const optimistic = op?.optimistic;
-  const maybe = optimistic?.fxOrderByTrackGuid?.[trackGuid];
+  const maybe = optimistic?.fxOrderByTrackGuid?.[tg];
   if (Array.isArray(maybe)) return maybe;
 
-  const base = fxOrderByTrackGuid?.[trackGuid];
+  const base = fxOrderByTrackGuid?.[tg];
   if (!Array.isArray(base)) return null;
 
   const order = base.slice();
@@ -524,7 +552,6 @@ function computeCollapsedSet(pendingOrder, pendingById) {
     const intent = op.intent || {};
     const kind = intent.kind || intent.name || op.kind;
 
-    // Existing (Reaper-ish)
     if (kind === "setVol") {
       const k = intent.trackGuid;
       if (!k) continue;
@@ -539,23 +566,22 @@ function computeCollapsedSet(pendingOrder, pendingById) {
       lastPan.set(k, opId);
     }
 
-    // ✅ Buffered / RFX-named (your UI emits these)
     if (kind === "setTrackVolume") {
-      const k = intent.trackGuid;
+      const k = canonicalTrackGuid(intent.trackGuid);
       if (!k) continue;
       if (lastVol.has(k)) collapsed.add(lastVol.get(k));
       lastVol.set(k, opId);
     }
 
     if (kind === "setTrackPan") {
-      const k = intent.trackGuid;
+      const k = canonicalTrackGuid(intent.trackGuid);
       if (!k) continue;
       if (lastPan.has(k)) collapsed.add(lastPan.get(k));
       lastPan.set(k, opId);
     }
 
     if (kind === "setBusVolume") {
-      const k = intent.busId;
+      const k = canonicalTrackGuid(intent.trackGuid);
       if (!k) continue;
       if (lastBusVol.has(k)) collapsed.add(lastBusVol.get(k));
       lastBusVol.set(k, opId);
@@ -570,11 +596,14 @@ function clearOverlayForOp(overlay, op) {
   if (!optimistic) return overlay;
 
   const next = {
+    bus: { ...(overlay.bus || {}) },
     track: { ...(overlay.track || {}) },
     fx: { ...(overlay.fx || {}) },
     fxOrderByTrackGuid: { ...(overlay.fxOrderByTrackGuid || {}) },
   };
-
+  if (optimistic.bus) {
+    for (const id of Object.keys(optimistic.bus)) delete next.bus[id];
+  }
   if (optimistic.track) {
     for (const guid of Object.keys(optimistic.track)) delete next.track[guid];
   }
