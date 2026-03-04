@@ -7,7 +7,7 @@ export const styles = {
   BusCardAreaGrid: "grid grid-cols-2 grid-rows-2 gap-3 h-full min-h-0",
   BusCardButton: "h-full min-h-0 text-left",
   BusCardInnerRow: "h-full min-h-0 flex",
-  BusCardLeft: "flex-1 p-4 min-w-0 min-h-0 flex flex-col gap-2",
+  BusCardLeft: "flex-1 p-3 min-w-0 min-h-0 flex flex-col gap-2",
   BusCardHeader: "flex items-center gap-2",
   BusCardTitle: "text-lg font-semibold tracking-wide",
   BusCardActivePill: "text-[11px] px-2 py-0.5 rounded-full bg-white/15 border border-white/10",

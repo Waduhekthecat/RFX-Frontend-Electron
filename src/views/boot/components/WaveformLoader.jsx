@@ -8,39 +8,61 @@ export function WaveformLoader({ progress01 = 0, height = 44 }) {
     if (!canvas) return;
 
     const ctx = canvas.getContext("2d");
-    let raf = 0;
+    if (!ctx) return;
 
+    let raf = 0;
+    let ro = null;
+
+    // Cache (avoid per-frame allocations where possible)
+    let w = 600;
+    let h = height;
+    let playX = 0;
+
+    // DPR sizing
     const resize = () => {
       const dpr = window.devicePixelRatio || 1;
       const parent = canvas.parentElement;
       const cssW = parent ? parent.clientWidth : 600;
       const cssH = height;
 
+      w = cssW;
+      h = cssH;
+
       canvas.style.width = cssW + "px";
       canvas.style.height = cssH + "px";
 
-      canvas.width = Math.floor(cssW * dpr);
-      canvas.height = Math.floor(cssH * dpr);
+      canvas.width = Math.max(1, Math.floor(cssW * dpr));
+      canvas.height = Math.max(1, Math.floor(cssH * dpr));
 
+      // draw in CSS pixels
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     };
 
-    resize();
-    const ro = new ResizeObserver(resize);
-    if (canvas.parentElement) ro.observe(canvas.parentElement);
-
-    const rand = (seed) => {
+    // Deterministic-ish noise without allocations
+    const rand01 = (seed) => {
       const x = Math.sin(seed * 999.123) * 10000;
       return x - Math.floor(x);
     };
 
-    const draw = (t) => {
-      const parent = canvas.parentElement;
-      const w = parent ? parent.clientWidth : 600;
-      const h = height;
+    // Initial + observe
+    resize();
+    ro = new ResizeObserver(resize);
+    if (canvas.parentElement) ro.observe(canvas.parentElement);
 
+    const draw = (t) => {
+      const time = t / 1000;
+      const mid = h / 2;
+
+      // clamp progress
+      const p = clamp01(progress01);
+
+      // playhead (clamped away from edges)
+      playX = Math.max(8, Math.min(w - 8, p * w));
+
+      // clear
       ctx.clearRect(0, 0, w, h);
 
+      // outer pill bg
       roundRect(ctx, 0.5, 0.5, w - 1, h - 1, 999);
       ctx.fillStyle = "rgba(255,255,255,0.03)";
       ctx.fill();
@@ -48,21 +70,20 @@ export function WaveformLoader({ progress01 = 0, height = 44 }) {
       ctx.lineWidth = 1;
       ctx.stroke();
 
-      const playX = Math.max(8, Math.min(w - 8, progress01 * w));
-      const glow = ctx.createRadialGradient(playX, h / 2, 2, playX, h / 2, 28);
+      // glow around playhead
+      const glow = ctx.createRadialGradient(playX, mid, 2, playX, mid, 28);
       glow.addColorStop(0, "rgba(255,255,255,0.18)");
       glow.addColorStop(1, "rgba(255,255,255,0)");
       ctx.fillStyle = glow;
       ctx.fillRect(playX - 40, 0, 80, h);
 
+      // clip inside pill
       ctx.save();
       roundRect(ctx, 1, 1, w - 2, h - 2, 999);
       ctx.clip();
 
-      const time = t / 1000;
-      const mid = h / 2;
-
-      const ampBase = 0.22 + 0.35 * progress01;
+      // amplitude grows with progress
+      const ampBase = 0.22 + 0.35 * p;
 
       const layers = [
         { a: 1.0, f: 1.9, s: 0.0, o: 0.18, lw: 1.25 },
@@ -70,19 +91,29 @@ export function WaveformLoader({ progress01 = 0, height = 44 }) {
         { a: 0.45, f: 6.0, s: 4.2, o: 0.08, lw: 1.0 },
       ];
 
+      // waveform lines
       for (let li = 0; li < layers.length; li++) {
         const L = layers[li];
         ctx.beginPath();
 
+        // step 1px in CSS space
         for (let x = 0; x <= w; x += 1) {
           const nx = x / w;
 
-          const s1 = Math.sin(nx * Math.PI * 2 * L.f + time * (1.2 + L.f * 0.2) + L.s);
-          const s2 = 0.35 * Math.sin(nx * Math.PI * 2 * (L.f * 2.1) + time * (0.9 + L.f * 0.25));
+          const s1 = Math.sin(
+            nx * Math.PI * 2 * L.f + time * (1.2 + L.f * 0.2) + L.s
+          );
+          const s2 =
+            0.35 *
+            Math.sin(
+              nx * Math.PI * 2 * (L.f * 2.1) + time * (0.9 + L.f * 0.25)
+            );
           const drift = 0.15 * Math.sin(time * 1.1 + nx * 10.0);
-          const noise = (rand(nx * 1000 + time * 10 + li * 77) - 0.5) * 0.22;
+          const noise =
+            (rand01(nx * 1000 + time * 10 + li * 77) - 0.5) * 0.22;
 
           const y = mid + (s1 + s2 + drift + noise) * (h * ampBase * L.a);
+
           if (x === 0) ctx.moveTo(x, y);
           else ctx.lineTo(x, y);
         }
@@ -92,6 +123,7 @@ export function WaveformLoader({ progress01 = 0, height = 44 }) {
         ctx.stroke();
       }
 
+      // playhead
       ctx.beginPath();
       ctx.moveTo(playX, 6);
       ctx.lineTo(playX, h - 6);
@@ -99,6 +131,7 @@ export function WaveformLoader({ progress01 = 0, height = 44 }) {
       ctx.lineWidth = 1;
       ctx.stroke();
 
+      // center line
       ctx.beginPath();
       ctx.moveTo(0, mid);
       ctx.lineTo(w, mid);
@@ -112,17 +145,29 @@ export function WaveformLoader({ progress01 = 0, height = 44 }) {
     };
 
     raf = requestAnimationFrame(draw);
+
     return () => {
       cancelAnimationFrame(raf);
-      ro.disconnect();
+      if (ro) ro.disconnect();
     };
   }, [progress01, height]);
 
   return <canvas ref={ref} />;
 }
 
+function clamp01(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return 0;
+  if (v < 0) return 0;
+  if (v > 1) return 1;
+  return v;
+}
+
+// ✅ Updated: clamps radius to prevent canvas warnings
 function roundRect(ctx, x, y, w, h, r) {
-  const rr = Math.min(r, w / 2, h / 2);
+  const safeR = Number.isFinite(r) ? Math.max(0, r) : 0;
+  const rr = Math.min(safeR, w / 2, h / 2);
+
   ctx.beginPath();
   ctx.moveTo(x + rr, y);
   ctx.arcTo(x + w, y, x + w, y + h, rr);

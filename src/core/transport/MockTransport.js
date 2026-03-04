@@ -706,8 +706,14 @@ export function createMockTransport() {
         const fx = vm.fxByGuid?.[fxGuid];
         if (!fx) return { ok: false, error: `fx not found: ${fxGuid}` };
 
-        // ✅ IMPORTANT: use the FX truth name/vendor/format
-        // and generate ONLY 8 params max
+        // ✅ IMPORTANT: if we already have it cached, do NOT regenerate.
+        const existing = vm.fxParamsByGuid?.[fxGuid];
+        if (existing) {
+          bumpSeq();
+          emit();
+          return { ok: true };
+        }
+
         const manifest = makeMockParamManifestForFx({
           id: fxGuid,
           guid: fxGuid,
@@ -718,7 +724,6 @@ export function createMockTransport() {
         });
 
         bumpSeq();
-
         vm = {
           ...vm,
           fxParamsByGuid: {
@@ -730,6 +735,7 @@ export function createMockTransport() {
         emit();
         return { ok: true };
       }
+
       if (c.name === "setParamValue") {
         const fxGuid = asStr(c.fxGuid, "");
         const paramIdx = Number(c.paramIdx);

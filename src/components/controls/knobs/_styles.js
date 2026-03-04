@@ -77,7 +77,7 @@ export const styles = {
     gridTemplateColumns: `repeat(${count || 1}, 1fr)`,
     justifyItems: "center",
     alignItems: "end",
-    padding: "10px 36px",
+    padding: "20px 36px",
     borderRadius: 13,
     background: `
       linear-gradient(

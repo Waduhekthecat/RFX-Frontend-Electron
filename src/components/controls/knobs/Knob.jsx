@@ -3,14 +3,10 @@ import React from "react";
 import knobStripUrl from "../../../assets/knobSpriteStrip.png";
 import { styles, SPRITE_FRAMES, RENDER_SIZE, CENTER_FRAME } from "./_styles";
 
-// URL TO ADJUST KNOB STYLES: https://www.g200kg.com/en/webknobman/index.html?f=ABS.knob&n=2571
-
 function clamp01(n) {
   const v = Number(n);
   if (!Number.isFinite(v)) return 0;
-  if (v < 0) return 0;
-  if (v > 1) return 1;
-  return v;
+  return Math.max(0, Math.min(1, v));
 }
 
 function valueToFrame(v01, frames) {
@@ -19,11 +15,9 @@ function valueToFrame(v01, frames) {
   return Math.max(0, Math.min(frames - 1, idx));
 }
 
-// --- Global drag lock helpers (prevents text/image selection while dragging) ---
 function setGlobalDragLock(on) {
   const b = document.body;
   if (!b) return;
-
   if (on) {
     b.style.userSelect = "none";
     b.style.webkitUserSelect = "none";
@@ -35,16 +29,21 @@ function setGlobalDragLock(on) {
   }
 }
 
-export function Knob({ label, value, mapped, mappedLabel, onChange }) {
+export function Knob({
+  id,
+  label,
+  value,
+  mapped,
+  mappedLabel,
+  mappingArmed,
+  onTap,
+  onChange,
+  onCommit, // ✅ NEW
+}) {
   const [dragging, setDragging] = React.useState(false);
-
-  // startRef: { y, v, pointerId }
   const startRef = React.useRef(null);
-
-  // ✅ double click / double tap support (mouse + touchscreen)
   const lastTapRef = React.useRef(0);
-
-  const [nat, setNat] = React.useState(null); // { w, h }
+  const [nat, setNat] = React.useState(null);
 
   React.useEffect(() => {
     const img = new Image();
@@ -52,18 +51,10 @@ export function Knob({ label, value, mapped, mappedLabel, onChange }) {
     img.src = knobStripUrl;
   }, []);
 
-  // Ensure drag lock is removed if component unmounts mid-drag
   React.useEffect(() => () => setGlobalDragLock(false), []);
 
   const v = clamp01(value);
   const frameIndex = valueToFrame(v, SPRITE_FRAMES);
-
-  function resetToCenter() {
-    onChange?.(0.5);
-    setDragging(false);
-    startRef.current = null;
-    setGlobalDragLock(false);
-  }
 
   function finishDrag(el, pointerId) {
     setDragging(false);
@@ -72,14 +63,28 @@ export function Knob({ label, value, mapped, mappedLabel, onChange }) {
 
     try {
       if (el && pointerId != null) el.releasePointerCapture?.(pointerId);
-    } catch {
-      // ignore
-    }
+    } catch { }
+
+    onCommit?.(); // ✅ NEW
+  }
+
+  function resetToCenter() {
+    onChange?.(0.5);
+    setDragging(false);
+    startRef.current = null;
+    setGlobalDragLock(false);
+    onCommit?.(); // ✅ NEW
   }
 
   function onPointerDown(e) {
     e.preventDefault();
     e.stopPropagation();
+
+    // If mapping mode, treat tap as selection (don’t start drag)
+    if (mappingArmed) {
+      onTap?.(id);
+      return;
+    }
 
     const now = Date.now();
     const delta = now - lastTapRef.current;
@@ -103,7 +108,6 @@ export function Knob({ label, value, mapped, mappedLabel, onChange }) {
 
   function onPointerMove(e) {
     if (!dragging || !startRef.current) return;
-
     e.preventDefault();
     e.stopPropagation();
 
@@ -125,16 +129,13 @@ export function Knob({ label, value, mapped, mappedLabel, onChange }) {
       finishDrag(e.currentTarget, startRef.current?.pointerId ?? e.pointerId);
   }
 
-  // --- Sprite math (vertical strip) ---
   const srcW = nat?.w ?? 1;
   const srcH = nat?.h ?? SPRITE_FRAMES;
-
   const srcFrameH = Math.max(1, Math.floor(srcH / SPRITE_FRAMES));
   const scale = RENDER_SIZE / srcFrameH;
 
   const stripW = Math.round(srcW * scale);
   const stripH = Math.round(srcH * scale);
-
   const frameRenderH = srcFrameH * scale;
   const y = -frameIndex * frameRenderH;
 
@@ -142,7 +143,6 @@ export function Knob({ label, value, mapped, mappedLabel, onChange }) {
 
   return (
     <div style={styles.knobWrap(containerW)}>
-      {/* KNOB FACE */}
       <div
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -164,11 +164,16 @@ export function Knob({ label, value, mapped, mappedLabel, onChange }) {
       <div style={styles.labelWrap}>
         <div style={styles.label}>{label}</div>
 
-        {mapped && mappedLabel ? (
-          <div style={styles.mappedLabel} title={mappedLabel}>
-            {mappedLabel}
-          </div>
-        ) : null}
+        {/* ✅ always reserve a line so layout doesn't shift when mapped */}
+        <div
+          style={{
+            ...styles.mappedLabel,
+            visibility: mapped && mappedLabel ? "visible" : "hidden",
+          }}
+          title={mapped && mappedLabel ? mappedLabel : ""}
+        >
+          {mapped && mappedLabel ? mappedLabel : "placeholder"}
+        </div>
       </div>
     </div>
   );

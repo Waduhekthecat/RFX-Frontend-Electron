@@ -667,6 +667,60 @@ export const useRfxStore = create((set, get) => ({
     }));
   },
 
+  unmapKnob: ({ busId, knobId }) => {
+    const b = String(busId || "");
+    const k = String(knobId || "");
+    if (!b || !k) return;
+
+    const cur = get().perf?.knobMapByBusId?.[b]?.[k];
+    get().logEvent("knobmap:unmapped", { busId: b, knobId: k, prev: cur || null });
+
+    set((s) => {
+      const busMap = { ...((s.perf.knobMapByBusId || {})[b] || {}) };
+      delete busMap[k];
+
+      return {
+        perf: {
+          ...s.perf,
+          knobMapByBusId: {
+            ...(s.perf.knobMapByBusId || {}),
+            [b]: busMap,
+          },
+        },
+      };
+    });
+  },
+
+  unmapParamFromBus: ({ busId, fxGuid, paramIdx }) => {
+    const b = String(busId || "");
+    const fx = String(fxGuid || "");
+    const idx = Number(paramIdx);
+    if (!b || !fx || !Number.isFinite(idx)) return;
+
+    const busMap = get().perf?.knobMapByBusId?.[b] || {};
+    const toRemove = Object.entries(busMap)
+      .filter(([, t]) => String(t?.fxGuid || "") === fx && Number(t?.paramIdx) === idx)
+      .map(([knobId]) => knobId);
+
+    if (!toRemove.length) return;
+
+    get().logEvent("knobmap:param_unmapped", { busId: b, fxGuid: fx, paramIdx: idx, knobs: toRemove });
+
+    set((s) => {
+      const nextBusMap = { ...((s.perf.knobMapByBusId || {})[b] || {}) };
+      for (const k of toRemove) delete nextBusMap[k];
+
+      return {
+        perf: {
+          ...s.perf,
+          knobMapByBusId: {
+            ...(s.perf.knobMapByBusId || {}),
+            [b]: nextBusMap,
+          },
+        },
+      };
+    });
+  },
   // ------------------------------------------------------------
   // Session helpers
   // ------------------------------------------------------------
