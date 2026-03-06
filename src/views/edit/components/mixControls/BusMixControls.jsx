@@ -7,6 +7,7 @@ import { useDoubleTap, useScrubValue, Surface } from "../../../../components/ui/
 
 const BUS_VOL_SENSITIVITY = 0.005; // tweak to taste
 const BUS_VOL_ACCEL = { enabled: true, exponent: 1.7, accel: 0.02 }; // faster ramp for volume
+const DEFAULT_BUS_VOL01 = 0.8;
 
 function clamp01(n) {
   const v = Number(n);

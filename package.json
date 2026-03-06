@@ -1,5 +1,5 @@
 {
-  "main": "electron/main.js",
+  "main": "electron/main.cjs",
   "name": "rfx",
   "private": true,
   "version": "0.0.0",

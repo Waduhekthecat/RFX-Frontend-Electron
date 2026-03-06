@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { styles } from "./_styles";
 import { ItemRow, Section, Pill, Btn, Toggle } from "./components/_index";
 
@@ -10,6 +11,8 @@ import { ItemRow, Section, Pill, Btn, Toggle } from "./components/_index";
  */
 
 export function SystemView() {
+  const navigate = useNavigate();
+
   // Local-only state for now (wire later)
   const [wifiEnabled, setWifiEnabled] = useState(false);
   const [btEnabled, setBtEnabled] = useState(false);
@@ -25,6 +28,17 @@ export function SystemView() {
     }),
     []
   );
+
+  function handleRestart() {
+    // First move the app back to the Perform route.
+    navigate("/", { replace: true });
+
+    // Then reload on the next tick so the browser reloads the root route
+    // instead of the current /system route.
+    setTimeout(() => {
+      window.location.reload();
+    }, 0);
+  }
 
   return (
     <div className={styles.wrap}>
@@ -60,16 +74,28 @@ export function SystemView() {
 
           {/* Companion / Device */}
           <Section title="Connect to device">
-            <ItemRow title="User PC" desc={deviceStatus} right={<Pill>{deviceStatus}</Pill>} />
+            <ItemRow
+              title="User PC"
+              desc={deviceStatus}
+              right={<Pill>{deviceStatus}</Pill>}
+            />
             <ItemRow
               title="Pair / Connect"
               desc="Connect RFX to a companion app or desktop controller"
-              right={<Btn onClick={() => console.log("[System] connect device")}>Connect</Btn>}
+              right={
+                <Btn onClick={() => console.log("[System] connect device")}>
+                  Connect
+                </Btn>
+              }
             />
             <ItemRow
               title="Forget device"
               desc="Clear saved pairing and connection info"
-              right={<Btn onClick={() => console.log("[System] forget device")}>Forget</Btn>}
+              right={
+                <Btn onClick={() => console.log("[System] forget device")}>
+                  Forget
+                </Btn>
+              }
             />
           </Section>
 
@@ -83,12 +109,20 @@ export function SystemView() {
             <ItemRow
               title="Check for updates"
               desc="Downloads and installs RFX updates (not REAPER)"
-              right={<Btn onClick={() => console.log("[System] check updates")}>Check</Btn>}
+              right={
+                <Btn onClick={() => console.log("[System] check updates")}>
+                  Check
+                </Btn>
+              }
             />
             <ItemRow
               title="Install from USB"
               desc="Offline update flow for touring rigs"
-              right={<Btn onClick={() => console.log("[System] install usb")}>Install</Btn>}
+              right={
+                <Btn onClick={() => console.log("[System] install usb")}>
+                  Install
+                </Btn>
+              }
             />
           </Section>
 
@@ -102,17 +136,25 @@ export function SystemView() {
             <ItemRow
               title="Open logs"
               desc="View system / transport logs"
-              right={<Btn onClick={() => console.log("[System] open logs")}>Open</Btn>}
+              right={
+                <Btn onClick={() => console.log("[System] open logs")}>
+                  Open
+                </Btn>
+              }
             />
             <ItemRow
               title="Diagnostics"
               desc="Export a debug bundle for support"
-              right={<Btn onClick={() => console.log("[System] export diagnostics")}>Export</Btn>}
+              right={
+                <Btn onClick={() => console.log("[System] export diagnostics")}>
+                  Export
+                </Btn>
+              }
             />
             <ItemRow
               title="Restart UI"
               desc="Soft restart (frontend only)"
-              right={<Btn onClick={() => window.location.reload()}>Restart</Btn>}
+              right={<Btn onClick={handleRestart}>Restart</Btn>}
             />
           </Section>
         </div>
