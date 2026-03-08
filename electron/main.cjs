@@ -3,205 +3,16 @@ const { app, BrowserWindow, ipcMain } = require("electron");
 
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
 
-function clamp01(n) {
-  const v = Number(n);
-  if (!Number.isFinite(v)) return 0;
-  if (v < 0) return 0;
-  if (v > 1) return 1;
-  return v;
-}
+const { dispatchCmdJson } = require("./ipc/dispatcher.cjs");
+const { createIpcWatchers } = require("./ipc/watchers.cjs");
+const { getIpcPaths } = require("./ipc/paths.cjs");
+const { ensureDir, readJsonSafe } = require("./ipc/jsonfile.cjs");
+const { createFallbackVm } = require("./ipc/mockVm.cjs");
 
-function nowSec() {
-  return Math.floor(Date.now() / 1000);
-}
-
-function normalizeMode(m) {
-  const x = String(m || "linear").toLowerCase();
-  if (x === "lcr") return "lcr";
-  if (x === "parallel") return "parallel";
-  return "linear";
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function createMockBackend() {
-  let seq = 1;
-
-  let vm = {
-    schemaVersion: 1,
-    schema: "mock_vm_v2",
-    seq,
-    ts: nowSec(),
-    capabilities: { routingModes: ["linear", "parallel", "lcr"] },
-    buses: [
-      { id: "FX_1", label: "FX_1", busNum: 1 },
-      { id: "FX_2", label: "FX_2", busNum: 2 },
-      { id: "FX_3", label: "FX_3", busNum: 3 },
-      { id: "FX_4", label: "FX_4", busNum: 4 },
-    ],
-    activeBusId: "FX_1",
-    busModes: {
-      FX_1: "linear",
-      FX_2: "parallel",
-      FX_3: "lcr",
-      FX_4: "parallel",
-    },
-    meters: {
-      FX_1: { l: 0.1, r: 0.12 },
-      FX_2: { l: 0.02, r: 0.03 },
-      FX_3: { l: 0.0, r: 0.0 },
-      FX_4: { l: 0.05, r: 0.04 },
-    },
-  };
-
-  let metersEnabled = true;
-  const windows = new Set();
-
-  function broadcast(channel, payload) {
-    for (const win of windows) {
-      if (!win || win.isDestroyed()) continue;
-      win.webContents.send(channel, payload);
-    }
-  }
-
-  function bumpSeq() {
-    seq += 1;
-    vm = { ...vm, seq, ts: nowSec() };
-  }
-
-  function emitVm() {
-    broadcast("rfx:vm", vm);
-  }
-
-  function emitMetersFrame(busId, meter) {
-    broadcast("rfx:meters", {
-      t: Date.now(),
-      activeBusId: busId,
-      metersByBusId: { [busId]: meter },
-      metersById: { [busId]: meter },
-    });
-  }
-
-  function seedMetersForActiveBus() {
-    const id = vm.activeBusId;
-    if (!id) return;
-    const meter = vm.meters && vm.meters[id];
-    if (!meter) return;
-    emitMetersFrame(id, meter);
-  }
-
-  function tickMeters() {
-    if (!metersEnabled) return;
-
-    const id = vm.activeBusId;
-    if (!id) return;
-
-    const prev = vm.meters[id] || { l: 0, r: 0 };
-    const next = {
-      l: clamp01(prev.l * 0.85 + Math.random() * 0.35),
-      r: clamp01(prev.r * 0.85 + Math.random() * 0.35),
-    };
-
-    vm = {
-      ...vm,
-      meters: {
-        ...vm.meters,
-        [id]: next,
-      },
-    };
-
-    emitMetersFrame(id, next);
-  }
-
-  const meterTimer = setInterval(tickMeters, 60);
-
-  return {
-    attachWindow(win) {
-      windows.add(win);
-      win.on("closed", () => {
-        windows.delete(win);
-      });
-    },
-
-    dispose() {
-      clearInterval(meterTimer);
-    },
-
-    async boot() {
-      await sleep(600);
-      await sleep(900);
-      bumpSeq();
-      emitVm();
-      seedMetersForActiveBus();
-      return { ok: true, seq };
-    },
-
-    getSnapshot() {
-      return vm;
-    },
-
-    async syscall(call) {
-      const name = call && call.name === "setStateMode"
-        ? "setRoutingMode"
-        : call && call.name;
-
-      if (!name) {
-        return { ok: false, error: "invalid syscall" };
-      }
-
-      if (name === "selectActiveBus") {
-        if (!call.busId) {
-          return { ok: false, error: "missing busId" };
-        }
-
-        bumpSeq();
-        vm = {
-          ...vm,
-          activeBusId: call.busId,
-        };
-        emitVm();
-        seedMetersForActiveBus();
-        return { ok: true };
-      }
-
-      if (name === "setRoutingMode") {
-        const id = call.busId;
-        if (!id) {
-          return { ok: false, error: "missing busId" };
-        }
-
-        bumpSeq();
-        vm = {
-          ...vm,
-          busModes: {
-            ...vm.busModes,
-            [id]: normalizeMode(call.mode),
-          },
-        };
-        emitVm();
-        return { ok: true };
-      }
-
-      if (name === "syncView") {
-        bumpSeq();
-        emitVm();
-        return { ok: true };
-      }
-
-      return { ok: false, error: `unknown syscall: ${String(name)}` };
-    },
-
-    setMetersEnabled(on) {
-      metersEnabled = !!on;
-      return { ok: true };
-    },
-  };
-}
-
-const backend = createMockBackend();
 let mainWindow = null;
+let liveVm = createFallbackVm();
+let liveInstalledFx = [];
+let watchers = null;
 
 function createWindow() {
   const preloadPath = path.join(__dirname, "preload.cjs");
@@ -221,8 +32,6 @@ function createWindow() {
     },
   });
 
-  backend.attachWindow(mainWindow);
-
   if (DEV_SERVER_URL) {
     mainWindow.loadURL(DEV_SERVER_URL);
     mainWindow.webContents.openDevTools({ mode: "detach" });
@@ -231,11 +40,71 @@ function createWindow() {
   }
 }
 
-ipcMain.handle("rfx:boot", async () => backend.boot());
-ipcMain.handle("rfx:getSnapshot", async () => backend.getSnapshot());
-ipcMain.handle("rfx:syscall", async (_evt, call) => backend.syscall(call));
+async function readInstalledFxSnapshot() {
+  const paths = getIpcPaths();
+  const list = await readJsonSafe(paths.pluginlist, []);
+  return Array.isArray(list) ? list : [];
+}
 
-app.whenReady().then(() => {
+async function bootIpc() {
+  const paths = getIpcPaths();
+  await ensureDir(paths.dir);
+
+  const vm = await readJsonSafe(paths.vm, null);
+  if (vm) {
+    liveVm = vm;
+  }
+
+  liveInstalledFx = await readInstalledFxSnapshot();
+
+  watchers = createIpcWatchers({
+    onVm(nextVm) {
+      liveVm = nextVm;
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("rfx:vm", nextVm);
+      }
+    },
+
+    onCmdResult(nextRes) {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("rfx:cmdResult", nextRes);
+      }
+    },
+
+    onInstalledFx(nextInstalledFx) {
+      liveInstalledFx = Array.isArray(nextInstalledFx) ? nextInstalledFx : [];
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("rfx:installedFx", liveInstalledFx);
+      }
+    },
+  });
+
+  await watchers.start();
+  await watchers.refreshVm().catch(() => { });
+  await watchers.refreshCmdResult().catch(() => { });
+
+  // prime installed plugins after watchers start
+  liveInstalledFx = await readInstalledFxSnapshot().catch(() => []);
+}
+
+ipcMain.handle("rfx:boot", async () => {
+  return { ok: true };
+});
+
+ipcMain.handle("rfx:getSnapshot", async () => {
+  return liveVm || createFallbackVm();
+});
+
+ipcMain.handle("rfx:getInstalledFx", async () => {
+  return Array.isArray(liveInstalledFx) ? liveInstalledFx : [];
+});
+
+ipcMain.handle("rfx:syscall", async (_evt, call) => {
+  return dispatchCmdJson(call);
+});
+
+app.whenReady().then(async () => {
+  await bootIpc();
   createWindow();
 
   app.on("activate", () => {
@@ -252,5 +121,5 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
-  backend.dispose();
+  if (watchers) watchers.stop();
 });

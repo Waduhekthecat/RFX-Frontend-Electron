@@ -1,4 +1,3 @@
-// src/components/controls/knobs/Knob.jsx
 import React from "react";
 import knobStripUrl from "../../../assets/knobSpriteStrip.png";
 import { styles, SPRITE_FRAMES, RENDER_SIZE, CENTER_FRAME } from "./_styles";
@@ -29,6 +28,10 @@ function setGlobalDragLock(on) {
   }
 }
 
+// smoothing for EXTERNAL updates only
+const SMOOTH_ALPHA = 0.22;
+const SMOOTH_EPS = 0.0015;
+
 export function Knob({
   id,
   label,
@@ -38,12 +41,18 @@ export function Knob({
   mappingArmed,
   onTap,
   onChange,
-  onCommit, // ✅ NEW
+  onCommit,
 }) {
   const [dragging, setDragging] = React.useState(false);
   const startRef = React.useRef(null);
   const lastTapRef = React.useRef(0);
   const [nat, setNat] = React.useState(null);
+
+  // ✅ display value for smoothing incoming mapped/store updates
+  const targetValue = clamp01(value);
+  const [displayValue, setDisplayValue] = React.useState(targetValue);
+  const rafRef = React.useRef(0);
+  const targetRef = React.useRef(targetValue);
 
   React.useEffect(() => {
     const img = new Image();
@@ -51,9 +60,54 @@ export function Knob({
     img.src = knobStripUrl;
   }, []);
 
-  React.useEffect(() => () => setGlobalDragLock(false), []);
+  React.useEffect(() => () => {
+    setGlobalDragLock(false);
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+  }, []);
 
-  const v = clamp01(value);
+  // ✅ smooth external updates, but do not fight active drag
+  React.useEffect(() => {
+    targetRef.current = targetValue;
+
+    if (dragging) {
+      setDisplayValue(targetValue);
+      return;
+    }
+
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+
+    const tick = () => {
+      setDisplayValue((prev) => {
+        const cur = clamp01(prev);
+        const tgt = clamp01(targetRef.current);
+        const diff = tgt - cur;
+
+        if (Math.abs(diff) <= SMOOTH_EPS) {
+          rafRef.current = 0;
+          return tgt;
+        }
+
+        const next = cur + diff * SMOOTH_ALPHA;
+        return clamp01(next);
+      });
+
+      rafRef.current = requestAnimationFrame(tick);
+    };
+
+    if (Math.abs(displayValue - targetValue) > SMOOTH_EPS) {
+      rafRef.current = requestAnimationFrame(tick);
+    } else {
+      setDisplayValue(targetValue);
+    }
+
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = 0;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetValue, dragging]);
+
+  const v = clamp01(displayValue);
   const frameIndex = valueToFrame(v, SPRITE_FRAMES);
 
   function finishDrag(el, pointerId) {
@@ -63,24 +117,25 @@ export function Knob({
 
     try {
       if (el && pointerId != null) el.releasePointerCapture?.(pointerId);
-    } catch { }
+    } catch {}
 
-    onCommit?.(); // ✅ NEW
+    onCommit?.();
   }
 
   function resetToCenter() {
-    onChange?.(0.5);
+    const next = 0.5;
+    setDisplayValue(next);
+    onChange?.(next);
     setDragging(false);
     startRef.current = null;
     setGlobalDragLock(false);
-    onCommit?.(); // ✅ NEW
+    onCommit?.();
   }
 
   function onPointerDown(e) {
     e.preventDefault();
     e.stopPropagation();
 
-    // If mapping mode, treat tap as selection (don’t start drag)
     if (mappingArmed) {
       onTap?.(id);
       return;
@@ -103,8 +158,7 @@ export function Knob({
     setGlobalDragLock(true);
     setDragging(true);
 
-    startRef.current = { y: e.clientY, v, pointerId };
-  }
+    startRef.current = { y: e.clientY, v: displayValue, pointerId };  }
 
   function onPointerMove(e) {
     if (!dragging || !startRef.current) return;
@@ -113,6 +167,9 @@ export function Knob({
 
     const dy = startRef.current.y - e.clientY;
     const next = clamp01(startRef.current.v + dy / 250);
+
+    // ✅ direct visual response while dragging
+    setDisplayValue(next);
     onChange?.(next);
   }
 
@@ -125,8 +182,9 @@ export function Knob({
   }
 
   function onLostPointerCapture(e) {
-    if (dragging)
+    if (dragging) {
       finishDrag(e.currentTarget, startRef.current?.pointerId ?? e.pointerId);
+    }
   }
 
   const srcW = nat?.w ?? 1;
@@ -160,11 +218,8 @@ export function Knob({
         />
       </div>
 
-      {/* LABELS */}
       <div style={styles.labelWrap}>
         <div style={styles.label}>{label}</div>
-
-        {/* ✅ always reserve a line so layout doesn't shift when mapped */}
         <div
           style={{
             ...styles.mappedLabel,

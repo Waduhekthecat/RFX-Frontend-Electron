@@ -1,6 +1,3 @@
-// Renderer-side transport that talks to Electron main via preload (window.rfx.transport).
-// Contract shape matches MockTransport: boot/getSnapshot/subscribe/syscall + subscribeMeters (optional).
-
 function isAvailable() {
   return typeof window !== "undefined" && !!window.rfx?.transport;
 }
@@ -10,39 +7,48 @@ export function createElectronTransport() {
 
   const api = window.rfx.transport;
 
-  // Cached snapshot so getSnapshot() is synchronous like MockTransport
   let vm = null;
+  let installedFx = [];
 
-  // Truth subscribers (snapshots)
   const subs = new Set();
-
-  // Telemetry subscribers (meters)
   const meterSubs = new Set();
+  const installedFxSubs = new Set();
+  const cmdResultSubs = new Set();
 
-  // Main -> renderer: truth snapshots
   const offVm =
     typeof api.onViewModel === "function"
       ? api.onViewModel((next) => {
-        vm = next;
-        subs.forEach((cb) => cb(vm));
-      })
+          vm = next;
+          subs.forEach((cb) => cb(vm));
+        })
       : null;
 
-  // Main -> renderer: meter frames (no seq)
+  const offCmdResult =
+    typeof api.onCmdResult === "function"
+      ? api.onCmdResult((result) => {
+          cmdResultSubs.forEach((cb) => cb(result));
+        })
+      : null;
+
   const offMeters =
     typeof api.onMeters === "function"
       ? api.onMeters((frame) => {
-        meterSubs.forEach((cb) => cb(frame));
-      })
+          meterSubs.forEach((cb) => cb(frame));
+        })
+      : null;
+
+  const offInstalledFx =
+    typeof api.onInstalledFx === "function"
+      ? api.onInstalledFx((next) => {
+          installedFx = Array.isArray(next) ? next : [];
+          installedFxSubs.forEach((cb) => cb(installedFx));
+        })
       : null;
 
   const transport = {
     async boot() {
-      // 1) Ask main to boot
       const res = await api.boot();
 
-      // 2) Option B: Pull snapshot once to guarantee vm is primed immediately
-      //    (even if the first rfx:vm event arrives slightly later).
       try {
         const snap = await api.getSnapshot();
         if (snap) {
@@ -50,7 +56,17 @@ export function createElectronTransport() {
           subs.forEach((cb) => cb(vm));
         }
       } catch {
-        // ignore — we still rely on rfx:vm push updates
+        // ignore
+      }
+
+      try {
+        if (typeof api.getInstalledFx === "function") {
+          const list = await api.getInstalledFx();
+          installedFx = Array.isArray(list) ? list : [];
+          installedFxSubs.forEach((cb) => cb(installedFx));
+        }
+      } catch {
+        // ignore
       }
 
       return res;
@@ -60,13 +76,27 @@ export function createElectronTransport() {
       return vm;
     },
 
+    getInstalledFx() {
+      return installedFx;
+    },
+
     subscribe(cb) {
       subs.add(cb);
       if (vm) cb(vm);
       return () => subs.delete(cb);
     },
 
-    // Optional telemetry channel (meters-only)
+    subscribeCmdResult(cb) {
+      cmdResultSubs.add(cb);
+      return () => cmdResultSubs.delete(cb);
+    },
+
+    subscribeInstalledFx(cb) {
+      installedFxSubs.add(cb);
+      cb(installedFx);
+      return () => installedFxSubs.delete(cb);
+    },
+
     subscribeMeters(cb) {
       meterSubs.add(cb);
       return () => meterSubs.delete(cb);
@@ -76,14 +106,18 @@ export function createElectronTransport() {
       return api.syscall(call);
     },
 
-    // Optional cleanup hook if you ever need it (not required by contract)
     destroy() {
       try {
         offVm?.();
+        offCmdResult?.();
         offMeters?.();
-      } catch { }
+        offInstalledFx?.();
+      } catch {}
+
       subs.clear();
+      cmdResultSubs.clear();
       meterSubs.clear();
+      installedFxSubs.clear();
     },
   };
 

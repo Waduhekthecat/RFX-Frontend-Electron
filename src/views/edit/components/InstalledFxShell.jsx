@@ -10,19 +10,16 @@ import { InstalledFxCardArea } from "./InstalledFxCardArea";
 import {
   norm,
   normalizeInstalledFx,
-  makeMockInstalledFx,
   getPluginType,
   getPluginFormat,
 } from "./InstalledFxUtils";
 import { styles } from "../_styles";
 
 export function InstalledFxShell({ installedFx, onPick, className = "" }) {
-  const fallback = useInstalledFxFromTransport();
-  const normalized = normalizeInstalledFx(installedFx ?? fallback);
+  const transportData = useInstalledFxFromTransport();
+  const normalized = normalizeInstalledFx(installedFx ?? transportData);
 
-  // If transport has nothing yet → use mock data
-  const data = normalized.plugins?.length > 0 ? normalized : makeMockInstalledFx(30);
-
+  const data = normalized;
   const all = data.plugins ?? [];
 
   const [filterOpen, setFilterOpen] = React.useState(false);
@@ -115,6 +112,7 @@ export function InstalledFxShell({ installedFx, onPick, className = "" }) {
 
         <div className={styles.InstalledFxHeaderRight}>
           <button
+            type="button"
             onClick={() => setFilterOpen(true)}
             className={styles.InstalledFxFilterBtn}
           >
@@ -127,7 +125,13 @@ export function InstalledFxShell({ installedFx, onPick, className = "" }) {
         <Inset className={styles.InstalledFxInset}>
           <SimpleBar className={styles.InstalledFxScroll}>
             <div className={styles.InstalledFxScrollInner}>
-              <InstalledFxCardArea items={filtered} onPick={onPick} />
+              {all.length === 0 ? (
+                <div className="h-full min-h-[160px] flex items-center justify-center text-white/35 text-[12px] border border-dashed border-white/10 rounded-2xl">
+                  No installed plugins loaded yet
+                </div>
+              ) : (
+                <InstalledFxCardArea items={filtered} onPick={onPick} />
+              )}
             </div>
           </SimpleBar>
         </Inset>

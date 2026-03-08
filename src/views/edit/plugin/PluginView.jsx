@@ -148,11 +148,18 @@ export function PluginView() {
   // ---------------------------
   // Kick the syscall when entering PluginView
   // ---------------------------
+  const requestedParamsRef = React.useRef(new Set());
+
   React.useEffect(() => {
     if (!trackGuid || !fxGuid) return;
-    if (truthManifest) return; // ✅ already loaded, don’t re-fetch
+    if (truthManifest) return;
+
+    const key = `${trackGuid}:${fxGuid}`;
+    if (requestedParamsRef.current.has(key)) return;
+
+    requestedParamsRef.current.add(key);
     intent({ name: "getPluginParams", trackGuid, fxGuid });
-  }, [intent, trackGuid, fxGuid, truthManifest]);
+  }, [trackGuid, fxGuid, truthManifest, intent]);
 
   // Build fallback mock manifest (only if no truth yet)
   React.useEffect(() => {
@@ -282,19 +289,20 @@ export function PluginView() {
           ) : (
             <>
               {/* ✅ Remove the "EQ" + "Source..." block to reclaim space */}
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 grid-rows-3 gap-3 h-full">                {params.map((p) => (
-                <ParamCard
-                  key={p.idx}
-                  trackGuid={trackGuid}
-                  fxGuid={fxGuid}
-                  p={p}
-                  onChange01={onParamScrub}
-                  onCommit01={onParamCommit}
-                  onMap={onMap}
-                  onUnmap={onUnmap}
-                  mappedKnobs={mappedKnobsByParamIdx?.[Number(p.idx)] || []}
-                />
-              ))}
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 content-start">
+                {params.map((p) => (
+                  <ParamCard
+                    key={p.idx}
+                    trackGuid={trackGuid}
+                    fxGuid={fxGuid}
+                    p={p}
+                    onChange01={onParamScrub}
+                    onCommit01={onParamCommit}
+                    onMap={onMap}
+                    onUnmap={onUnmap}
+                    mappedKnobs={mappedKnobsByParamIdx?.[Number(p.idx)] || []}
+                  />
+                ))}
               </div>
             </>
           )}

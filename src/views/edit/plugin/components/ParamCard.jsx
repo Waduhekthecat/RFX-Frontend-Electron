@@ -1,7 +1,11 @@
 import React from "react";
 import { useRfxStore } from "../../../../core/rfx/Store";
 import { Slider } from "../../../../components/controls/sliders/_index";
-import { Surface, useScrubValue, useDoubleTap } from "../../../../components/ui/gestures/_index";
+import {
+  Surface,
+  useScrubValue,
+  useDoubleTap,
+} from "../../../../components/ui/gestures/_index";
 
 function clamp01(n) {
   const v = Number(n);
@@ -9,65 +13,73 @@ function clamp01(n) {
   return Math.max(0, Math.min(1, v));
 }
 
-// Tune feel (similar vibe to TrackMixControls)
-const PARAM_SENSITIVITY = 0.0045;
-
-// ✅ smoothing for external updates (knob -> param)
-const SMOOTH_ALPHA = 0.18; // 0..1 (higher = snappier, lower = smoother)
-const SMOOTH_EPS = 0.0015; // stop animating when within eps
-
-function selectFxParam01(s, fxGuid, paramIdx, fallback01 = 0.5) {
-  // 1) optimistic override (during scrub or remote knob changes)
-  const patch = s?.ops?.overlay?.fxParamsByGuid?.[fxGuid]?.[paramIdx];
-  if (patch && Number.isFinite(Number(patch.value01))) return clamp01(patch.value01);
-
-  // 2) truth
-  const manifest =
-    s?.snapshot?.fxParamsByGuid?.[fxGuid] ??
-    s?.entities?.fxParamsByGuid?.[fxGuid];
-
-  const p = manifest?.params?.find?.((x) => Number(x?.idx) === Number(paramIdx));
-  if (p && Number.isFinite(Number(p.value01))) return clamp01(p.value01);
-
-  return clamp01(fallback01);
-}
+const PARAM_SENSITIVITY = 0.0026;
+const SMOOTH_ALPHA = 0.18;
+const SMOOTH_EPS = 0.0015;
 
 export function ParamCard({
   fxGuid,
   p,
-  onChange01,  // (p, next01) => void
-  onCommit01,  // () => void
-  onMap,       // (p) => void
-  onUnmap,     // (p) => void
+  onChange01,
+  onCommit01,
+  onMap,
+  onUnmap,
   mappedKnobs = [],
 }) {
   const paramIdx = Number(p?.idx ?? 0);
-  const fallback01 = clamp01(p?.value01 ?? 0.5);
 
-  const truth01 = useRfxStore(
-    React.useCallback(
-      (s) => selectFxParam01(s, fxGuid, paramIdx, fallback01),
-      [fxGuid, paramIdx, fallback01]
-    )
+  // ✅ select only stable raw references from store
+  const overlayEntry = useRfxStore(
+    (s) => s?.ops?.overlay?.fxParamsByGuid?.[fxGuid]?.[paramIdx] ?? null
   );
 
-  // local drag flag (same as you had)
-  const isDraggingRef = React.useRef(false);
+  const manifest = useRfxStore(
+    (s) =>
+      s?.entities?.fxParamsByGuid?.[fxGuid] ??
+      s?.snapshot?.fxParamsByGuid?.[fxGuid] ??
+      null
+  );
 
-  // local display value (what the slider renders)
+  // ✅ derive outside selector
+  const truthParam = React.useMemo(() => {
+    return (
+      manifest?.params?.find?.((x) => Number(x?.idx) === Number(paramIdx)) ?? null
+    );
+  }, [manifest, paramIdx]);
+
+  const liveParam = React.useMemo(() => {
+    return {
+      ...(p || {}),
+      ...(truthParam || {}),
+      ...(overlayEntry || {}),
+      idx: Number(
+        overlayEntry?.idx ??
+        truthParam?.idx ??
+        p?.idx ??
+        paramIdx
+      ),
+      value01: clamp01(
+        overlayEntry?.value01 ??
+        truthParam?.value01 ??
+        p?.value01 ??
+        0.5
+      ),
+    };
+  }, [p, truthParam, overlayEntry, paramIdx]);
+
+  const truth01 = clamp01(liveParam?.value01 ?? 0.5);
+
+  const isDraggingRef = React.useRef(false);
   const [live01, setLive01] = React.useState(truth01);
 
-  // ✅ smooth external updates (when NOT dragging)
   const rafRef = React.useRef(0);
   const targetRef = React.useRef(truth01);
 
   React.useEffect(() => {
     targetRef.current = truth01;
 
-    // if user is currently dragging this param, don't fight them
     if (isDraggingRef.current) return;
 
-    // cancel any previous loop
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
 
     const tick = () => {
@@ -81,25 +93,20 @@ export function ParamCard({
         const tgt = clamp01(targetRef.current);
         const diff = tgt - cur;
 
-        // close enough → snap + stop
         if (Math.abs(diff) <= SMOOTH_EPS) {
           rafRef.current = 0;
           return tgt;
         }
 
-        // low-pass / lerp
-        const next = cur + diff * SMOOTH_ALPHA;
-        return clamp01(next);
+        return clamp01(cur + diff * SMOOTH_ALPHA);
       });
 
       rafRef.current = requestAnimationFrame(tick);
     };
 
-    // start loop only if we're meaningfully far away
     if (Math.abs(truth01 - live01) > SMOOTH_EPS) {
       rafRef.current = requestAnimationFrame(tick);
     } else {
-      // keep in sync
       setLive01(truth01);
     }
 
@@ -108,26 +115,22 @@ export function ParamCard({
       rafRef.current = 0;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [truth01]); // intentionally only re-run when truth changes
-
-  const label = String(p?.uiLabel || p?.name || `Param ${paramIdx}`).trim();
-  const subtitle = String(p?.name || "").trim();
+  }, [truth01]);
 
   function endGesture() {
     if (!isDraggingRef.current) return;
     isDraggingRef.current = false;
     onCommit01?.();
-    // after releasing, truth smoothing will take back over if needed
   }
 
   const reset = React.useCallback(() => {
-    const next = clamp01(p?.default01 ?? 0.5);
-    isDraggingRef.current = true;     // treat reset like a local edit
+    const next = clamp01(liveParam?.default01 ?? p?.default01 ?? 0.5);
+    isDraggingRef.current = true;
     setLive01(next);
-    onChange01?.(p, next);
+    onChange01?.(liveParam || p, next);
     onCommit01?.();
     isDraggingRef.current = false;
-  }, [onChange01, onCommit01, p]);
+  }, [liveParam, p, onChange01, onCommit01]);
 
   const dbl = useDoubleTap(reset);
 
@@ -140,20 +143,33 @@ export function ParamCard({
     onChange: (next) => {
       isDraggingRef.current = true;
       setLive01(next);
-      onChange01?.(p, next);
+      onChange01?.(liveParam || p, next);
     },
     onEnd: endGesture,
   });
 
-  const valueText = p?.fmt ? String(p.fmt) : `${Math.round(live01 * 100)}%`;
+  const label = String(
+    liveParam?.uiLabel || liveParam?.name || `Param ${paramIdx}`
+  ).trim();
+
+  const subtitle = String(liveParam?.name || "").trim();
+
+  const hasLocalOverlayValue =
+    overlayEntry && Number.isFinite(Number(overlayEntry.value01));
+
+  const valueText = hasLocalOverlayValue
+    ? `${Math.round(live01 * 100)}%`
+    : liveParam?.fmt != null && String(liveParam.fmt).trim() !== ""
+      ? String(liveParam.fmt)
+      : `${Math.round(live01 * 100)}%`;
 
   const mapped = Array.isArray(mappedKnobs) && mappedKnobs.length > 0;
   const mappedText = mapped ? `Mapped: ${mappedKnobs.join(", ")}` : "";
 
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/5 p-3 h-full flex flex-col">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
+    <div className="rounded-2xl border border-white/10 bg-white/5 p-3 h-full flex flex-col min-h-0 overflow-hidden">
+      <div className="flex items-start justify-between gap-3 min-w-0">
+        <div className="min-w-0 flex-1">
           <div className="text-[12px] font-semibold tracking-wide text-white truncate">
             {label}
           </div>
@@ -163,7 +179,7 @@ export function ParamCard({
         <div className="flex items-center gap-2 shrink-0">
           {mapped ? (
             <div
-              className="px-2.5 py-1 rounded-full border border-emerald-300/30 bg-emerald-500/15 text-[10px] font-semibold text-emerald-200 shadow-[0_0_0_1px_rgba(16,185,129,0.15)]"
+              className="max-w-[180px] px-2.5 py-1 rounded-full border border-emerald-300/30 bg-emerald-500/15 text-[10px] font-semibold text-emerald-200 shadow-[0_0_0_1px_rgba(16,185,129,0.15)] truncate"
               title={mappedText}
             >
               {mappedText}
@@ -173,18 +189,22 @@ export function ParamCard({
           <button
             type="button"
             onClick={() => {
-              if (mapped) onUnmap?.(p);
-              else onMap?.(p);
+              if (mapped) onUnmap?.(liveParam || p);
+              else onMap?.(liveParam || p);
             }}
             className="h-8 px-3 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-[11px] font-semibold text-white/80"
-            title={mapped ? "Unmap this parameter from knobs on this bus" : "Map to a macro knob"}
+            title={
+              mapped
+                ? "Unmap this parameter from knobs on this bus"
+                : "Map to a macro knob"
+            }
           >
             {mapped ? "UNMAP" : "MAP"}
           </button>
         </div>
       </div>
 
-      <div className="mt-3">
+      <div className="mt-3 min-w-0">
         <Surface gestures={[scrub, dbl]}>
           <Slider
             label=""
@@ -194,14 +214,16 @@ export function ParamCard({
             value={live01}
             valueText={valueText}
             widthClass="w-full"
-            onChange={() => {}}
+            onChange={() => { }}
           />
         </Surface>
       </div>
 
-      <div className="mt-auto pt-2 flex items-center justify-between">
-        <div className="text-[11px] text-white/45">{valueText}</div>
-        <div className="text-[10px] text-white/30 tabular-nums">#{paramIdx}</div>
+      <div className="mt-auto pt-2 flex items-center justify-between gap-3 min-w-0">
+        <div className="text-[11px] text-white/45 truncate">{valueText}</div>
+        <div className="text-[10px] text-white/30 tabular-nums shrink-0">
+          #{paramIdx}
+        </div>
       </div>
     </div>
   );

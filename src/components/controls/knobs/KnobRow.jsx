@@ -10,7 +10,7 @@ function clamp01(n) {
   return Math.max(0, Math.min(1, v));
 }
 
-// how long we "trust local drag" before allowing store-driven value to override
+// keep local ownership briefly after release so truth can catch up
 const LOCAL_HOLD_MS = 120;
 
 export function KnobRow({ knobs, busId, mappingArmed }) {
@@ -25,14 +25,77 @@ export function KnobRow({ knobs, busId, mappingArmed }) {
 
   const visibleKnobs = React.useMemo(() => (knobs || []).slice(0, 7), [knobs]);
 
-  // ✅ local live values for smooth feel
   const [localValues, setLocalValues] = React.useState(() => ({}));
-  const lastLocalTsRef = React.useRef({}); // { [knobId]: ms }
+  const activeLocalKnobsRef = React.useRef(new Set());
+  const releaseTimersRef = React.useRef({});
 
-  // ✅ keep localValues in sync with props, BUT don't stomp user drag
+  // ---------------------------
+  // Local param overlay helpers
+  // Shape expected by ParamCard:
+  // s.ops.overlay.fxParamsByGuid[fxGuid][paramIdx] = { value01 }
+  // ---------------------------
+  const setFxParamOverlayLocal = React.useCallback((fxGuid, paramIdx, value01) => {
+    useRfxStore.setState((s) => {
+      const prevOps = s.ops || {};
+      const prevOverlay = prevOps.overlay || {};
+      const prevByGuid = prevOverlay.fxParamsByGuid || {};
+      const prevForFx = prevByGuid[fxGuid] || {};
+      const prevPatch = prevForFx[paramIdx] || {};
+
+      return {
+        ops: {
+          ...prevOps,
+          overlay: {
+            ...prevOverlay,
+            fxParamsByGuid: {
+              ...prevByGuid,
+              [fxGuid]: {
+                ...prevForFx,
+                [paramIdx]: {
+                  ...prevPatch,
+                  value01: clamp01(value01),
+                },
+              },
+            },
+          },
+        },
+      };
+    });
+  }, []);
+
+  const clearFxParamOverlayLocal = React.useCallback((fxGuid, paramIdx) => {
+    useRfxStore.setState((s) => {
+      const prevOps = s.ops || {};
+      const prevOverlay = prevOps.overlay || {};
+      const prevByGuid = prevOverlay.fxParamsByGuid || {};
+      const prevForFx = prevByGuid[fxGuid];
+
+      if (!prevForFx || !prevForFx[paramIdx]) return s;
+
+      const nextForFx = { ...prevForFx };
+      delete nextForFx[paramIdx];
+
+      const nextByGuid = { ...prevByGuid };
+      if (Object.keys(nextForFx).length > 0) {
+        nextByGuid[fxGuid] = nextForFx;
+      } else {
+        delete nextByGuid[fxGuid];
+      }
+
+      return {
+        ops: {
+          ...prevOps,
+          overlay: {
+            ...prevOverlay,
+            fxParamsByGuid: nextByGuid,
+          },
+        },
+      };
+    });
+  }, []);
+
+  // keep local cache seeded from props when not locally controlled
   React.useEffect(() => {
-    const now = Date.now();
-
     setLocalValues((prev) => {
       let changed = false;
       const next = { ...prev };
@@ -40,16 +103,13 @@ export function KnobRow({ knobs, busId, mappingArmed }) {
       for (const k of visibleKnobs) {
         const id = k.id;
         const propV = clamp01(k.value);
-        const lastTs = lastLocalTsRef.current[id] || 0;
 
-        // if user hasn't touched recently, sync local from prop
-        if (now - lastTs > LOCAL_HOLD_MS) {
+        if (!activeLocalKnobsRef.current.has(id)) {
           if (!Number.isFinite(next[id]) || Math.abs(next[id] - propV) > 0.0001) {
             next[id] = propV;
             changed = true;
           }
         } else {
-          // ensure key exists even if first render during drag window
           if (!Number.isFinite(next[id])) {
             next[id] = propV;
             changed = true;
@@ -61,36 +121,78 @@ export function KnobRow({ knobs, busId, mappingArmed }) {
     });
   }, [visibleKnobs]);
 
+  React.useEffect(() => {
+    return () => {
+      const timers = releaseTimersRef.current || {};
+      for (const id of Object.keys(timers)) {
+        window.clearTimeout(timers[id]);
+      }
+      releaseTimersRef.current = {};
+    };
+  }, []);
+
   const onKnobChange = React.useCallback(
     (knobId, next01) => {
       const v01 = clamp01(next01);
 
-      // 1) local live immediately (smooth)
-      lastLocalTsRef.current[knobId] = Date.now();
-      setLocalValues((prev) => (prev[knobId] === v01 ? prev : { ...prev, [knobId]: v01 }));
+      if (releaseTimersRef.current[knobId]) {
+        window.clearTimeout(releaseTimersRef.current[knobId]);
+        delete releaseTimersRef.current[knobId];
+      }
 
-      // 2) persist local knob value per bus in store (for bus switching / persistence)
+      activeLocalKnobsRef.current.add(knobId);
+
+      // immediate local render for knob
+      setLocalValues((prev) =>
+        prev[knobId] === v01 ? prev : { ...prev, [knobId]: v01 }
+      );
+
+      // persist local knob value per bus
       setKnobValueLocal({ busId: busKey, knobId, value01: v01 });
 
-      // 3) if mapped, send buffered setParamValue
       const target = mapForBus?.[knobId];
       if (target?.fxGuid && Number.isFinite(Number(target?.paramIdx))) {
-        const key = `${target.fxGuid}:param:${Number(target.paramIdx)}:knob:${knobId}`;
+        const fxGuid = String(target.fxGuid);
+        const paramIdx = Number(target.paramIdx);
+
+        // immediate local overlay for ParamCard slider
+        setFxParamOverlayLocal(fxGuid, paramIdx, v01);
+
+        // buffered truth commit
+        const key = `${fxGuid}:param:${paramIdx}:knob:${knobId}`;
         send(key, {
           name: "setParamValue",
           trackGuid: target.trackGuid,
-          fxGuid: target.fxGuid,
-          paramIdx: Number(target.paramIdx),
+          fxGuid,
+          paramIdx,
           value01: v01,
         });
       }
     },
-    [busKey, mapForBus, send, setKnobValueLocal]
+    [busKey, mapForBus, send, setKnobValueLocal, setFxParamOverlayLocal]
   );
 
-  const onKnobCommit = React.useCallback(() => {
-    flush();
-  }, [flush]);
+  const onKnobCommit = React.useCallback(
+    (knobId) => {
+      flush();
+
+      if (releaseTimersRef.current[knobId]) {
+        window.clearTimeout(releaseTimersRef.current[knobId]);
+      }
+
+      releaseTimersRef.current[knobId] = window.setTimeout(() => {
+        activeLocalKnobsRef.current.delete(knobId);
+
+        const target = mapForBus?.[knobId];
+        if (target?.fxGuid && Number.isFinite(Number(target?.paramIdx))) {
+          clearFxParamOverlayLocal(String(target.fxGuid), Number(target.paramIdx));
+        }
+
+        delete releaseTimersRef.current[knobId];
+      }, LOCAL_HOLD_MS);
+    },
+    [flush, mapForBus, clearFxParamOverlayLocal]
+  );
 
   const onKnobTap = React.useCallback(
     (knobId) => {
@@ -100,16 +202,14 @@ export function KnobRow({ knobs, busId, mappingArmed }) {
     [mappingArmed, commitKnobMapping, busKey]
   );
 
-  // choose what to render for knob face: local while "recently touched", else prop
   const renderValueFor = React.useCallback(
     (k) => {
       const id = k.id;
-      const now = Date.now();
-      const lastTs = lastLocalTsRef.current[id] || 0;
 
-      if (now - lastTs <= LOCAL_HOLD_MS) {
+      if (activeLocalKnobsRef.current.has(id)) {
         return clamp01(localValues[id]);
       }
+
       return clamp01(k.value);
     },
     [localValues]
@@ -125,11 +225,11 @@ export function KnobRow({ knobs, busId, mappingArmed }) {
             label={k.label}
             mapped={!!k.mapped}
             mappedLabel={k.mappedLabel || (k.mapped ? "Mapped" : "")}
-            value={renderValueFor(k)}          // ✅ smooth local while dragging
+            value={renderValueFor(k)}
             mappingArmed={!!mappingArmed}
             onTap={onKnobTap}
             onChange={(next) => onKnobChange(k.id, next)}
-            onCommit={onKnobCommit}
+            onCommit={() => onKnobCommit(k.id)}
           />
         ))}
       </div>

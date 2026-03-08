@@ -1,19 +1,30 @@
-import * as React from "react";
+import React from "react";
 import { useTransport } from "../../../core/transport/TransportProvider";
 import { normalizeInstalledFx } from "./InstalledFxUtils";
 
+const EMPTY = Object.freeze({ count: 0, plugins: [] });
+
 export function useInstalledFxFromTransport() {
-  const t = useTransport();
-  const [vm, setVm] = React.useState(() => t.getSnapshot());
+  const transport = useTransport();
 
-  React.useEffect(() => t.subscribe(setVm), [t]);
+  const [data, setData] = React.useState(() => {
+    if (!transport?.getInstalledFx) return EMPTY;
+    return normalizeInstalledFx(transport.getInstalledFx());
+  });
 
-  const candidate =
-    vm?.installedFx ||
-    vm?.pluginList ||
-    vm?.installedPlugins ||
-    vm?.rfx_plugin_list ||
-    null;
+  React.useEffect(() => {
+    if (!transport) return;
 
-  return normalizeInstalledFx(candidate);
+    if (typeof transport.subscribeInstalledFx === "function") {
+      return transport.subscribeInstalledFx((next) => {
+        setData(normalizeInstalledFx(next));
+      });
+    }
+
+    if (typeof transport.getInstalledFx === "function") {
+      setData(normalizeInstalledFx(transport.getInstalledFx()));
+    }
+  }, [transport]);
+
+  return data;
 }

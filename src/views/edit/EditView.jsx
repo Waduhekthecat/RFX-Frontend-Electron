@@ -287,18 +287,16 @@ function TrackDetailCard({ trackGuid, intent }) {
     if (!picked) return;
     if (chain.length >= PLUGIN_MAX) return;
 
-    const nextFxGuid = uid("fx");
-    const fxName = String(picked?.name || picked?.raw || "Plugin").trim() || "Plugin";
+    const fxRaw = String(picked?.raw || "").trim();
+    if (!fxRaw) {
+      console.warn("Picked plugin is missing raw identifier:", picked);
+      return;
+    }
 
     intent?.({
       name: "addFx",
-      trackGuid: tg, // ✅ canonical
-      fxGuid: nextFxGuid,
-      fxName,
-      fxVendor: picked?.vendor,
-      fxFormat: picked?.format || picked?.kind,
-      raw: picked?.raw,
-      enabled: true,
+      trackGuid: tg,
+      fxRaw,
     });
   }
 
