@@ -13,6 +13,10 @@ function clamp01(n) {
   return Math.max(0, Math.min(1, v));
 }
 
+function makeGestureId(prefix = "g") {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
 const PARAM_SENSITIVITY = 0.0026;
 const SMOOTH_ALPHA = 0.18;
 const SMOOTH_EPS = 0.0015;
@@ -66,21 +70,30 @@ export function ParamCard({
     };
   }, [p, truthParam, overlayEntry, paramIdx]);
 
-  // Important: truth target should come from actual truth, not overlay
+  // actual REAPER truth only
   const truth01 = clamp01(
     truthParam?.value01 ??
       p?.value01 ??
       0.5
   );
 
+  // rendered target = optimistic overlay if present, otherwise truth
+  const rendered01 = clamp01(
+    overlayEntry?.value01 ??
+      truthParam?.value01 ??
+      p?.value01 ??
+      0.5
+  );
+
   const [isDragging, setIsDragging] = React.useState(false);
-  const [live01, setLive01] = React.useState(truth01);
+  const [live01, setLive01] = React.useState(rendered01);
 
   const rafRef = React.useRef(0);
-  const targetRef = React.useRef(truth01);
+  const targetRef = React.useRef(rendered01);
+  const gestureIdRef = React.useRef(null);
 
   React.useEffect(() => {
-    targetRef.current = truth01;
+    targetRef.current = rendered01;
 
     if (isDragging) return;
 
@@ -108,31 +121,42 @@ export function ParamCard({
       rafRef.current = requestAnimationFrame(tick);
     };
 
-    if (Math.abs(truth01 - live01) > SMOOTH_EPS) {
+    if (Math.abs(rendered01 - live01) > SMOOTH_EPS) {
       rafRef.current = requestAnimationFrame(tick);
     } else {
-      setLive01(truth01);
+      setLive01(rendered01);
     }
 
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       rafRef.current = 0;
     };
-  }, [truth01, isDragging, live01]);
+  }, [rendered01, isDragging, live01]);
 
-  function endGesture() {
+  function endGesture(finalValue01) {
     if (!isDragging) return;
+
+    const gestureId = gestureIdRef.current || makeGestureId("fxParam");
+
     setIsDragging(false);
-    onCommit01?.();
+    onCommit01?.(liveParam || p, clamp01(finalValue01), gestureId);
+
+    gestureIdRef.current = null;
   }
 
   const reset = React.useCallback(() => {
     const next = clamp01(liveParam?.default01 ?? p?.default01 ?? 0.5);
+    const gestureId = makeGestureId("fxParamReset");
+
+    gestureIdRef.current = gestureId;
     setIsDragging(true);
     setLive01(next);
-    onChange01?.(liveParam || p, next);
-    onCommit01?.();
+
+    onChange01?.(liveParam || p, next, gestureId);
+    onCommit01?.(liveParam || p, next, gestureId);
+
     setIsDragging(false);
+    gestureIdRef.current = null;
   }, [liveParam, p, onChange01, onCommit01]);
 
   const dbl = useDoubleTap(reset);
@@ -144,11 +168,17 @@ export function ParamCard({
     max: 1,
     sensitivity: PARAM_SENSITIVITY,
     onChange: (next) => {
-      setIsDragging(true);
-      setLive01(next);
-      onChange01?.(liveParam || p, next);
+      const clamped = clamp01(next);
+
+      if (!isDragging) {
+        setIsDragging(true);
+        gestureIdRef.current = makeGestureId("fxParam");
+      }
+
+      setLive01(clamped);
+      onChange01?.(liveParam || p, clamped, gestureIdRef.current);
     },
-    onEnd: endGesture,
+    onEnd: ({ value }) => endGesture(value),
   });
 
   const label = String(
@@ -157,16 +187,10 @@ export function ParamCard({
 
   const subtitle = String(liveParam?.name || "").trim();
 
-  const hasLocalOverlayValue =
-    isDragging &&
-    overlayEntry &&
-    Number.isFinite(Number(overlayEntry.value01));
-
-  const valueText = hasLocalOverlayValue
-    ? `${Math.round(live01 * 100)}%`
-    : liveParam?.fmt != null && String(liveParam.fmt).trim() !== ""
+  const valueText =
+    liveParam?.fmt != null && String(liveParam.fmt).trim() !== ""
       ? String(liveParam.fmt)
-      : `${Math.round(truth01 * 100)}%`;
+      : `${Math.round(live01 * 100)}%`;
 
   const mapped = Array.isArray(mappedKnobs) && mappedKnobs.length > 0;
   const mappedText = mapped ? `Mapped: ${mappedKnobs.join(", ")}` : "";
@@ -225,7 +249,9 @@ export function ParamCard({
       </div>
 
       <div className="mt-auto pt-2 flex items-center justify-between gap-3 min-w-0">
-        <div className="text-[11px] text-white/45 truncate">{valueText}</div>
+        <div className="text-[11px] text-white/45 truncate">
+          truth={Math.round(truth01 * 100)}% • rendered={Math.round(rendered01 * 100)}%
+        </div>
         <div className="text-[10px] text-white/30 tabular-nums shrink-0">
           #{paramIdx}
         </div>

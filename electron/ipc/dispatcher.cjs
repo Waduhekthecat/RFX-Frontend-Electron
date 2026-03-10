@@ -30,8 +30,16 @@ function canonicalTrackGuid(id) {
   return String(id || "").replace(/^([A-Za-z]+_\d+)_([ABC])$/, "$1$2");
 }
 
-function normBusId(x) {
-  return String(x || "");
+function normBusId(id) {
+  const s = String(id || "").trim().toUpperCase();
+  if (!s) return "";
+
+  if (s === "INPUT") return "INPUT";
+
+  const m = s.match(/^FX_(\d+)([ABC])?$/);
+  if (!m) return s;
+
+  return `FX_${m[1]}`;
 }
 
 function normTrackId(x) {
@@ -81,6 +89,8 @@ function makePayload(call) {
       return {
         busId: normBusId(call.busId),
         value: clamp01(call.value ?? call.vol),
+        phase: call.phase === "preview" ? "preview" : "commit",
+        gestureId: call.gestureId || null,
       };
 
     case "setTrackVolume":

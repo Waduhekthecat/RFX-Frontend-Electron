@@ -194,7 +194,7 @@ local function collect_track_mix()
     local id = ids[i]
     local tr = find_track_by_name(id)
 
-    local vol = 0.8
+    local vol = 0.716
     local pan = 0.0
 
     if tr then
@@ -399,10 +399,10 @@ function M.export_vm()
       },
 
       busMix = {
-        FX_1 = { vol = 0.8 },
-        FX_2 = { vol = 0.8 },
-        FX_3 = { vol = 0.8 },
-        FX_4 = { vol = 0.8 },
+        FX_1 = { vol = 0.716 },
+        FX_2 = { vol = 0.716 },
+        FX_3 = { vol = 0.716 },
+        FX_4 = { vol = 0.716 },
       },
 
       tracks = tracks,

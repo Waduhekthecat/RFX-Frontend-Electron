@@ -15,7 +15,7 @@ import {
 
 const MAX_EVENT_LOG = 300;
 
-// ✅ Stable empty refs to avoid useSyncExternalStore infinite-loop traps
+// Stable empty refs to avoid useSyncExternalStore infinite-loop traps
 const EMPTY_ARR = Object.freeze([]);
 
 // ---------------------------
@@ -80,11 +80,26 @@ function mergeOverlay(base, patch) {
       ...(base.fxOrderByTrackGuid || {}),
       ...(patch.fxOrderByTrackGuid || {}),
     },
-    fxParamsByGuid: {
-      ...(base.fxParamsByGuid || {}),
-      ...(patch.fxParamsByGuid || {}),
-    },
+    fxParamsByGuid: mergeFxParamsOverlay(
+      base.fxParamsByGuid || {},
+      patch.fxParamsByGuid || {}
+    ),
   };
+}
+
+function mergeFxParamsOverlay(base, patch) {
+  if (!patch || typeof patch !== "object") return base || {};
+
+  const next = { ...(base || {}) };
+
+  for (const fxGuid of Object.keys(patch)) {
+    next[fxGuid] = {
+      ...((base || {})[fxGuid] || {}),
+      ...(patch[fxGuid] || {}),
+    };
+  }
+
+  return next;
 }
 
 function coerceToTransportCall(intent) {
@@ -114,6 +129,14 @@ function coerceMetersFrame(frame) {
   };
 }
 
+function clamp01(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return 0;
+  if (v < 0) return 0;
+  if (v > 1) return 1;
+  return v;
+}
+
 function isTrackVolumePreviewCall(call) {
   return call?.name === "setTrackVolume" && call?.phase === "preview";
 }
@@ -130,11 +153,29 @@ function isTrackPanCommitCall(call) {
   return call?.name === "setTrackPan" && call?.phase === "commit";
 }
 
+function isParamValuePreviewCall(call) {
+  return call?.name === "setParamValue" && call?.phase === "preview";
+}
+
+function isParamValueCommitCall(call) {
+  return call?.name === "setParamValue" && call?.phase === "commit";
+}
+
 function stripContinuousFields(call) {
   const next = { ...(call || {}) };
   delete next.phase;
   delete next.gestureId;
   return next;
+}
+
+function shouldSyncViewAfterCommit(call) {
+  const name = String(call?.name || "");
+  return (
+    name === "setTrackVolume" ||
+    name === "setTrackPan" ||
+    name === "setBusVolume" ||
+    name === "setParamValue"
+  );
 }
 
 async function trySendTrackVolumeOsc(transport, trackGuid, value) {
@@ -157,6 +198,16 @@ async function trySendTrackPanOsc(transport, trackGuid, value) {
   throw new Error("transport osc.sendTrackPan not wired");
 }
 
+async function trySendFxParamValueOsc(transport, payload) {
+  if (transport?.osc?.sendFxParamValue) {
+    return transport.osc.sendFxParamValue(payload);
+  }
+  if (transport?.sendFxParamValueOsc) {
+    return transport.sendFxParamValueOsc(payload);
+  }
+  throw new Error("transport osc.sendFxParamValue not wired");
+}
+
 export const useRfxStore = create((set, get) => ({
   // ---------------------------
   // Wiring: we will call transport.syscall(call)
@@ -174,6 +225,7 @@ export const useRfxStore = create((set, get) => ({
     receivedAtMs: 0,
     trackMix: {},
     busMix: {},
+    fxParamsByGuid: {},
   },
 
   reaper: { version: "unknown", resourcePath: "" },
@@ -197,7 +249,7 @@ export const useRfxStore = create((set, get) => ({
   },
 
   // ---------------------------
-  // ✅ Telemetry: meters (fast path, not seq-bearing)
+  // Telemetry: meters (fast path, not seq-bearing)
   // ---------------------------
   meters: {
     byId: {},
@@ -302,7 +354,7 @@ export const useRfxStore = create((set, get) => ({
     return patch ? { ...base, ...patch } : base;
   },
 
-  // ✅ IMPORTANT: never return a fresh [] (causes useSyncExternalStore loops)
+  // IMPORTANT: never return a fresh [] (causes useSyncExternalStore loops)
   selectFxOrderEffective: (trackGuid) => {
     const st = get();
     return (
@@ -321,7 +373,7 @@ export const useRfxStore = create((set, get) => ({
   },
 
   // ============================================================
-  // ✅ Ingest meters telemetry (Transport -> Store telemetry slice)
+  // Ingest meters telemetry (Transport -> Store telemetry slice)
   // ============================================================
   ingestMeters: (frameLike) => {
     const f = coerceMetersFrame(frameLike);
@@ -576,10 +628,83 @@ export const useRfxStore = create((set, get) => ({
     }
 
     // ------------------------------------------------------------
+    // Preview path: setParamValue
+    // ------------------------------------------------------------
+    if (isParamValuePreviewCall(call)) {
+      const fxGuid = String(call.fxGuid || "");
+      const paramIdx = Number(call.paramIdx);
+      const value01 = clamp01(call.value01 ?? call.value);
+
+      const fxMeta = get().entities?.fxByGuid?.[fxGuid] || null;
+      const trackGuid = String(call.trackGuid || fxMeta?.trackGuid || "");
+      const fxIndex = Number(fxMeta?.fxIndex);
+
+      if (!trackGuid || !fxGuid || !Number.isFinite(paramIdx)) return;
+
+      const previewIntent = {
+        name: "setParamValue",
+        trackGuid,
+        fxGuid,
+        paramIdx,
+        value01,
+      };
+
+      let optimistic = null;
+      try {
+        optimistic = buildOptimistic(get(), previewIntent);
+      } catch {
+        optimistic = null;
+      }
+
+      if (optimistic) {
+        set((s) => ({
+          ops: {
+            ...s.ops,
+            overlay: mergeOverlay(s.ops.overlay, optimistic),
+          },
+        }));
+      }
+
+      try {
+        await trySendFxParamValueOsc(transport, {
+          trackGuid,
+          fxGuid,
+          fxIndex,
+          paramIdx,
+          value01,
+        });
+
+        get().logEvent(
+          "osc:fxParam:preview",
+          { trackGuid, fxGuid, fxIndex, paramIdx, value01, gestureId: call.gestureId || null },
+          null
+        );
+      } catch (err) {
+        get().logEvent(
+          "osc:error",
+          {
+            kind: "setParamValue",
+            phase: "preview",
+            trackGuid,
+            fxGuid,
+            fxIndex,
+            paramIdx,
+            value01,
+            error: String(err?.message || err),
+          },
+          null
+        );
+      }
+
+      return;
+    }
+
+    // ------------------------------------------------------------
     // Continuous commit path setup: setTrackVolume / setTrackPan
     // ------------------------------------------------------------
     const isTrackVolCommit = isTrackVolumeCommitCall(call);
     const isTrackPanCommit = isTrackPanCommitCall(call);
+    const isParamCommit = isParamValueCommitCall(call);
     let syscallCall = call;
 
     if (isTrackVolCommit) {
@@ -650,6 +775,64 @@ export const useRfxStore = create((set, get) => ({
       syscallCall = stripContinuousFields(call);
     }
 
+    if (isParamCommit) {
+      const fxGuid = String(call.fxGuid || "");
+      const paramIdx = Number(call.paramIdx);
+      const value01 = clamp01(call.value01 ?? call.value);
+
+      const fxMeta = get().entities?.fxByGuid?.[fxGuid] || null;
+      const trackGuid = String(call.trackGuid || fxMeta?.trackGuid || "");
+      const fxIndex = Number(fxMeta?.fxIndex);
+
+      if (!trackGuid || !fxGuid || !Number.isFinite(paramIdx)) return;
+
+      try {
+        await trySendFxParamValueOsc(transport, {
+          trackGuid,
+          fxGuid,
+          fxIndex,
+          paramIdx,
+          value01,
+        });
+
+        get().logEvent(
+          "osc:fxParam:commit",
+          {
+            trackGuid,
+            fxGuid,
+            fxIndex,
+            paramIdx,
+            value01,
+            gestureId: call.gestureId || null,
+          },
+          null
+        );
+      } catch (err) {
+        get().logEvent(
+          "osc:error",
+          {
+            kind: "setParamValue",
+            phase: "commit",
+            trackGuid,
+            fxGuid,
+            fxIndex,
+            paramIdx,
+            value01,
+            error: String(err?.message || err),
+          },
+          null
+        );
+      }
+
+      syscallCall = stripContinuousFields({
+        ...call,
+        trackGuid,
+        fxGuid,
+        paramIdx,
+        value01,
+      });
+    }
+
     const opId = uid("op");
     const createdAtMs = nowMs();
 
@@ -657,7 +840,7 @@ export const useRfxStore = create((set, get) => ({
     let optimistic = null;
     if (!isTrackVolCommit && !isTrackPanCommit) {
       try {
-        optimistic = buildOptimistic(get(), intent);
+        optimistic = buildOptimistic(get(), syscallCall);
       } catch {
         optimistic = null;
       }
@@ -756,6 +939,27 @@ export const useRfxStore = create((set, get) => ({
         return;
       }
 
+      if (shouldSyncViewAfterCommit(syscallCall)) {
+        try {
+          await transport.syscall({ name: "syncView" });
+          get().logEvent(
+            "syscall:syncView_after_commit",
+            { after: syscallCall.name },
+            { opId }
+          );
+        } catch (err) {
+          get().logEvent(
+            "syscall:error",
+            {
+              kind: "syncView",
+              after: syscallCall.name,
+              error: String(err?.message || err),
+            },
+            { opId }
+          );
+        }
+      }
+
       // ack happens when snapshots come in and reconcilePending verifies fields
     } catch (err) {
       const msg = String(err?.message || err);
@@ -780,7 +984,7 @@ export const useRfxStore = create((set, get) => ({
   },
 
   // ------------------------------------------------------------
-  // ✅ Perf knob mapping helpers (RFX-owned, no transport)
+  // Perf knob mapping helpers (RFX-owned, no transport)
   // ------------------------------------------------------------
   armKnobMapping: (payload) => {
     const p = payload || {};

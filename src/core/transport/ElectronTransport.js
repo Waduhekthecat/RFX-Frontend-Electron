@@ -257,6 +257,61 @@ export function createElectronTransport() {
           "OSC bridge not wired: expected api.sendOsc / api.oscSend / api.sendBusVolumeOsc"
         );
       },
+
+      async sendFxParamValue({ trackGuid, fxIndex, paramIdx, value01 }) {
+        const guid = String(trackGuid || "").trim();
+        const fxSlot0 = Number(fxIndex);
+        const paramSlot0 = Number(paramIdx);
+        const value = clamp01(value01);
+
+        if (!guid) {
+          throw new Error("sendFxParamValue: invalid trackGuid");
+        }
+
+        if (!Number.isFinite(fxSlot0) || fxSlot0 < 0) {
+          throw new Error(`sendFxParamValue: invalid fxIndex ${fxIndex}`);
+        }
+
+        if (!Number.isFinite(paramSlot0) || paramSlot0 < 0) {
+          throw new Error(`sendFxParamValue: invalid paramIdx ${paramIdx}`);
+        }
+
+        const trackNumber = getTrackNumberFromRfxGuid(guid);
+        if (!Number.isFinite(trackNumber)) {
+          throw new Error(
+            `sendFxParamValue: could not resolve track number for guid ${guid}`
+          );
+        }
+
+        // REAPER OSC path is 1-based for fx and param slots
+        const fxSlot1 = fxSlot0 + 1;
+        const paramSlot1 = paramSlot0 + 1;
+        const address = `/track/${trackNumber}/fx/${fxSlot1}/fxparam/${paramSlot1}/value`;
+
+        if (typeof api.sendOsc === "function") {
+          return api.sendOsc({
+            address,
+            args: [value],
+          });
+        }
+
+        if (typeof api.oscSend === "function") {
+          return api.oscSend(address, [value]);
+        }
+
+        if (typeof api.sendFxParamValueOsc === "function") {
+          return api.sendFxParamValueOsc(
+            trackNumber,
+            fxSlot1,
+            paramSlot1,
+            value
+          );
+        }
+
+        throw new Error(
+          "OSC bridge not wired: expected api.sendOsc / api.oscSend / api.sendFxParamValueOsc"
+        );
+      },
     },
 
     destroy() {

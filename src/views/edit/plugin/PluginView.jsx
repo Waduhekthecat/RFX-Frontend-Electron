@@ -7,7 +7,6 @@ import { useIntent } from "../../../core/useIntent";
 import { useRfxStore } from "../../../core/rfx/Store";
 import { ParamCard } from "./components/ParamCard";
 import { makeMockParamManifestForFx } from "../../../core/transport/MockParameterGenerator";
-import { useIntentBuffered } from "../../../core/useIntentBuffered";
 import { KnobRow } from "../../../components/controls/knobs/KnobRow";
 
 const EMPTY = Object.freeze({});
@@ -25,12 +24,14 @@ function canonicalTrackGuid(id) {
 }
 
 function readFxParam01(sources, fxGuid, paramIdx, fallback01 = 0.5) {
-  // const overlayByGuid = sources?.overlayByGuid || EMPTY_OBJ;
+  const overlayByGuid = sources?.overlayByGuid || EMPTY_OBJ;
   const snapshotByGuid = sources?.snapshotByGuid || EMPTY_OBJ;
   const entitiesByGuid = sources?.entitiesByGuid || EMPTY_OBJ;
 
-  // const patch = overlayByGuid?.[fxGuid]?.[paramIdx];
-  // if (patch && Number.isFinite(Number(patch.value01))) return clamp01(patch.value01);
+  const patch = overlayByGuid?.[fxGuid]?.[paramIdx];
+  if (patch && Number.isFinite(Number(patch.value01))) {
+    return clamp01(patch.value01);
+  }
 
   const manifest = snapshotByGuid?.[fxGuid] ?? entitiesByGuid?.[fxGuid];
   const p = manifest?.params?.find?.((x) => Number(x?.idx) === Number(paramIdx));
@@ -43,7 +44,8 @@ export function PluginView() {
   const { trackId, fxId } = useParams();
   const nav = useNavigate();
   const intent = useIntent();
-  const { send, flush } = useIntentBuffered({ intervalMs: 5 });
+
+  const dispatchIntent = useRfxStore((s) => s.dispatchIntent);
 
   const trackGuid = React.useMemo(() => canonicalTrackGuid(trackId), [trackId]);
   const fxGuid = String(fxId || "");
@@ -146,26 +148,42 @@ export function PluginView() {
   }, [truthManifest, fx, fxGuid, trackGuid]);
 
   const onParamScrub = React.useCallback(
-    (p, next01) => {
+    (p, next01, gestureId) => {
       if (!p) return;
       const idx = Number(p.idx);
       if (!Number.isFinite(idx)) return;
 
-      const key = `${fxGuid}:param:${idx}`;
-      send(key, {
+      dispatchIntent({
         name: "setParamValue",
         trackGuid,
         fxGuid,
         paramIdx: idx,
         value01: clamp01(next01),
+        phase: "preview",
+        gestureId,
       });
     },
-    [send, fxGuid, trackGuid]
+    [dispatchIntent, fxGuid, trackGuid]
   );
 
-  const onParamCommit = React.useCallback(() => {
-    flush();
-  }, [flush]);
+  const onParamCommit = React.useCallback(
+    (p, final01, gestureId) => {
+      if (!p) return;
+      const idx = Number(p.idx);
+      if (!Number.isFinite(idx)) return;
+
+      dispatchIntent({
+        name: "setParamValue",
+        trackGuid,
+        fxGuid,
+        paramIdx: idx,
+        value01: clamp01(final01),
+        phase: "commit",
+        gestureId,
+      });
+    },
+    [dispatchIntent, fxGuid, trackGuid]
+  );
 
   const onMap = React.useCallback((p) => {
     if (!p) return;

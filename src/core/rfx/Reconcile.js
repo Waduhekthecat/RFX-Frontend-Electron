@@ -3,7 +3,14 @@
 import { settleContinuousOverlays } from "./Continuous";
 
 const OP_TIMEOUT_MS = 8000;
-const EPS = 1e-4;
+
+const VERIFY_EPS = {
+  trackVolume: 0.0015,
+  trackPan: 0.005,
+  busVolume: 0.0015,
+  paramValue: 0.002,
+  default: 1e-4,
+};
 
 function isMockVm(norm) {
   const schema = String(norm?.snapshot?.schema || "");
@@ -36,10 +43,93 @@ function v(ok, reason) {
   };
 }
 
+function getVerifyEps(kind) {
+  switch (String(kind || "")) {
+    case "setVol":
+    case "setTrackVolume":
+      return VERIFY_EPS.trackVolume;
+
+    case "setPan":
+    case "setTrackPan":
+      return VERIFY_EPS.trackPan;
+
+    case "setBusVolume":
+      return VERIFY_EPS.busVolume;
+
+    case "setParamValue":
+      return VERIFY_EPS.paramValue;
+
+    default:
+      return VERIFY_EPS.default;
+  }
+}
+
 function canonicalTrackGuid(id) {
   const s = String(id || "");
   // FX_1_A -> FX_1A (also FX_12_B -> FX_12B)
   return s.replace(/^([A-Za-z]+_\d+)_([ABC])$/, "$1$2");
+}
+
+function normBusId(id) {
+  const s = String(id || "").trim().toUpperCase();
+  if (!s) return "";
+  if (s === "INPUT") return "INPUT";
+
+  const m = s.match(/^FX_(\d+)([ABC])?$/);
+  if (!m) return s;
+
+  return `FX_${m[1]}`;
+}
+
+function panSignedTo01(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return NaN;
+  const clamped = Math.max(-1, Math.min(1, n));
+  return (clamped + 1) / 2;
+}
+
+function getRealVmTrackVol01(norm, trackGuid) {
+  const tg = canonicalTrackGuid(trackGuid);
+
+  const gotFromSnapshot = Number(norm?.snapshot?.trackMix?.[tg]?.vol);
+  if (Number.isFinite(gotFromSnapshot)) return gotFromSnapshot;
+
+  const gotFromEntity = Number(norm?.entities?.tracksByGuid?.[tg]?.vol);
+  if (Number.isFinite(gotFromEntity)) return gotFromEntity;
+
+  return NaN;
+}
+
+function getRealVmTrackPan01(norm, trackGuid) {
+  const tg = canonicalTrackGuid(trackGuid);
+
+  const gotFromSnapshot = Number(norm?.snapshot?.trackMix?.[tg]?.pan);
+  if (Number.isFinite(gotFromSnapshot)) {
+    // snapshot.trackMix pan is REAPER signed pan (-1..+1)
+    return panSignedTo01(gotFromSnapshot);
+  }
+
+  const gotFromEntity = Number(norm?.entities?.tracksByGuid?.[tg]?.pan);
+  if (Number.isFinite(gotFromEntity)) {
+    return panSignedTo01(gotFromEntity);
+  }
+
+  return NaN;
+}
+
+function getRealVmBusVol01(norm, busId) {
+  const bid = normBusId(busId);
+
+  const gotFromBusMix = Number(norm?.snapshot?.busMix?.[bid]?.vol);
+  if (Number.isFinite(gotFromBusMix)) return gotFromBusMix;
+
+  const gotFromTrackMix = Number(norm?.snapshot?.trackMix?.[bid]?.vol);
+  if (Number.isFinite(gotFromTrackMix)) return gotFromTrackMix;
+
+  const gotFromEntity = Number(norm?.entities?.tracksByGuid?.[bid]?.vol);
+  if (Number.isFinite(gotFromEntity)) return gotFromEntity;
+
+  return NaN;
 }
 
 export function reconcilePending(prevState, norm) {
@@ -86,10 +176,7 @@ export function reconcilePending(prevState, norm) {
         },
       };
 
-      // ✅ IMPORTANT:
-      // Do NOT clear overlay for superseded ops.
-      // Overlay is keyed by trackGuid/busId, so clearing here would also wipe
-      // the optimistic patch for the *newer* op that replaced it.
+      // Do not clear overlay for superseded ops.
       continue;
     }
 
@@ -116,7 +203,7 @@ export function reconcilePending(prevState, norm) {
       }
     }
 
-    // ✅ Ensure verify is written on EVERY reconcile attempt for sent ops.
+    // Ensure verify is written on EVERY reconcile attempt for sent ops.
     if (op.status === "sent" && !seqAdvanced && prevSeq !== 0) {
       nextPendingById[opId] = {
         ...op,
@@ -136,7 +223,7 @@ export function reconcilePending(prevState, norm) {
       continue;
     }
 
-    // ✅ verify with reasons (seq advanced OR prevSeq==0 boot edge)
+    // verify with reasons (seq advanced OR prevSeq==0 boot edge)
     const res = opVerifySnapshot(op, norm);
 
     nextPendingById[opId] = {
@@ -184,6 +271,7 @@ export function reconcilePending(prevState, norm) {
 function opVerifySnapshot(op, norm) {
   const intent = op?.intent || {};
   const kind = intent.kind || intent.name || op.kind;
+  const eps = getVerifyEps(kind);
 
   const tracksByGuid = norm?.entities?.tracksByGuid || {};
   const fxByGuid = norm?.entities?.fxByGuid || {};
@@ -232,12 +320,15 @@ function opVerifySnapshot(op, norm) {
       if (!trackGuid) return v(false, "missing trackGuid");
       const tr = tracksByGuid[trackGuid];
       if (!tr) return v(false, `track missing: ${trackGuid}`);
+
       const got = Number(tr.vol);
       const want = Number(value);
+
       if (!Number.isFinite(got) || !Number.isFinite(want)) {
         return v(false, `vol non-finite: want ${value} got ${tr.vol}`);
       }
-      return nearlyEqual(got, want, EPS)
+
+      return nearlyEqual(got, want, eps)
         ? v(true, REASONS.OK)
         : v(false, `vol mismatch: want ≈${want} got ${got}`);
     }
@@ -247,19 +338,23 @@ function opVerifySnapshot(op, norm) {
       if (!trackGuid) return v(false, "missing trackGuid");
       const tr = tracksByGuid[trackGuid];
       if (!tr) return v(false, `track missing: ${trackGuid}`);
-      const got = Number(tr.pan);
+
+      const got = panSignedTo01(tr.pan);
       const want = Number(value);
+
       if (!Number.isFinite(got) || !Number.isFinite(want)) {
         return v(false, `pan non-finite: want ${value} got ${tr.pan}`);
       }
-      return nearlyEqual(got, want, EPS)
+
+      return nearlyEqual(got, want, eps)
         ? v(true, REASONS.OK)
         : v(false, `pan mismatch: want ≈${want} got ${got}`);
     }
 
     // ---------------------------
-    // ✅ Buffered / RFX-named continuous controls
+    // Buffered / RFX-named continuous controls
     // For MOCK: verify against snapshot.trackMix / snapshot.busMix.
+    // For REAL VM: verify against exported VM truth.
     // ---------------------------
 
     case "setTrackVolume": {
@@ -271,22 +366,24 @@ function opVerifySnapshot(op, norm) {
         const tg = canonicalTrackGuid(trackGuid);
         const got = Number(mix[tg]?.vol);
         const want = Number(value);
+
         if (!Number.isFinite(got) || !Number.isFinite(want)) {
           return v(false, `mock track vol non-finite: want ${value} got ${got}`);
         }
-        return nearlyEqual(got, want, EPS)
+
+        return nearlyEqual(got, want, eps)
           ? v(true, REASONS.OK)
           : v(false, `mock track vol mismatch: want ≈${want} got ${got}`);
       }
 
-      const tr = tracksByGuid[trackGuid];
-      if (!tr) return v(false, `track missing: ${trackGuid}`);
-      const got = Number(tr.vol);
+      const got = getRealVmTrackVol01(norm, trackGuid);
       const want = Number(value);
+
       if (!Number.isFinite(got) || !Number.isFinite(want)) {
-        return v(false, `vol non-finite: want ${value} got ${tr.vol}`);
+        return v(false, `vol non-finite: want ${value} got ${got}`);
       }
-      return nearlyEqual(got, want, EPS)
+
+      return nearlyEqual(got, want, eps)
         ? v(true, REASONS.OK)
         : v(false, `vol mismatch: want ≈${want} got ${got}`);
     }
@@ -300,46 +397,59 @@ function opVerifySnapshot(op, norm) {
         const tg = canonicalTrackGuid(trackGuid);
         const got = Number(mix[tg]?.pan);
         const want = Number(value);
+
         if (!Number.isFinite(got) || !Number.isFinite(want)) {
           return v(false, `mock track pan non-finite: want ${value} got ${got}`);
         }
-        return nearlyEqual(got, want, EPS)
+
+        return nearlyEqual(got, want, eps)
           ? v(true, REASONS.OK)
           : v(false, `mock track pan mismatch: want ≈${want} got ${got}`);
       }
 
-      const tr = tracksByGuid[trackGuid];
-      if (!tr) return v(false, `track missing: ${trackGuid}`);
-      const got = Number(tr.pan);
+      const got = getRealVmTrackPan01(norm, trackGuid);
       const want = Number(value);
+
       if (!Number.isFinite(got) || !Number.isFinite(want)) {
-        return v(false, `pan non-finite: want ${value} got ${tr.pan}`);
+        return v(false, `pan non-finite: want ${value} got ${got}`);
       }
-      return nearlyEqual(got, want, EPS)
+
+      return nearlyEqual(got, want, eps)
         ? v(true, REASONS.OK)
         : v(false, `pan mismatch: want ≈${want} got ${got}`);
     }
 
     case "setBusVolume": {
-      const { busId, value } = intent;
+      const busId = normBusId(intent?.busId);
+      const want = Number(intent?.value);
+
       if (!busId) return v(false, "missing busId");
 
       if (isMockVm(norm)) {
         const got = Number(norm?.snapshot?.busMix?.[busId]?.vol);
-        const want = Number(value);
+
         if (!Number.isFinite(got) || !Number.isFinite(want)) {
-          return v(false, `mock bus vol non-finite: want ${value} got ${got}`);
+          return v(false, `mock bus vol non-finite: want ${want} got ${got}`);
         }
-        return nearlyEqual(got, want, EPS)
+
+        return nearlyEqual(got, want, eps)
           ? v(true, REASONS.OK)
           : v(false, `mock bus vol mismatch: want ≈${want} got ${got}`);
       }
 
-      return v(false, "setBusVolume verifier not wired for real VM yet");
+      const got = getRealVmBusVol01(norm, busId);
+
+      if (!Number.isFinite(got) || !Number.isFinite(want)) {
+        return v(false, `bus vol non-finite: want ${want} got ${got}`);
+      }
+
+      return nearlyEqual(got, want, eps)
+        ? v(true, REASONS.OK)
+        : v(false, `bus vol mismatch: want ≈${want} got ${got}`);
     }
 
     // ---------------------------
-    // ✅ FX verifiers (Option B)
+    // FX verifiers
     // ---------------------------
 
     case "addFx": {
@@ -420,8 +530,8 @@ function opVerifySnapshot(op, norm) {
       if (isMockVm(norm)) {
         const got = normalizeMode(
           norm?.perf?.busModesById?.[busId] ??
-            norm?.perf?.routingModesById?.[busId] ??
-            "linear"
+          norm?.perf?.routingModesById?.[busId] ??
+          "linear"
         );
         return got === want
           ? v(true, REASONS.OK)
@@ -441,20 +551,23 @@ function opVerifySnapshot(op, norm) {
       if (lanes.A) {
         const trA = tracksByGuid[lanes.A];
         if (!trA) return v(false, `lane A missing in snapshot (${busId}A)`);
-        if (!!trA.recArm !== !!wantA)
+        if (!!trA.recArm !== !!wantA) {
           return v(false, `${busId}A recArm mismatch: want ${!!wantA} got ${!!trA.recArm}`);
+        }
       }
       if (lanes.B) {
         const trB = tracksByGuid[lanes.B];
         if (!trB) return v(false, `lane B missing in snapshot (${busId}B)`);
-        if (!!trB.recArm !== !!wantB)
+        if (!!trB.recArm !== !!wantB) {
           return v(false, `${busId}B recArm mismatch: want ${!!wantB} got ${!!trB.recArm}`);
+        }
       }
       if (lanes.C) {
         const trC = tracksByGuid[lanes.C];
         if (!trC) return v(false, `lane C missing in snapshot (${busId}C)`);
-        if (!!trC.recArm !== !!wantC)
+        if (!!trC.recArm !== !!wantC) {
           return v(false, `${busId}C recArm mismatch: want ${!!wantC} got ${!!trC.recArm}`);
+        }
       }
 
       return v(true, REASONS.OK);
@@ -524,7 +637,7 @@ function opVerifySnapshot(op, norm) {
       const got = Number(p.value01);
       if (!Number.isFinite(got)) return v(false, `param value non-finite: idx=${paramIdx}`);
 
-      return nearlyEqual(got, want, EPS)
+      return nearlyEqual(got, want, eps)
         ? v(true, REASONS.OK)
         : v(false, `param mismatch: want ≈${want} got ${got}`);
     }
@@ -549,8 +662,7 @@ function resolveContinuousTruthValue01(key, norm) {
       return Number.isFinite(got) ? got : NaN;
     }
 
-    const got = Number(norm?.entities?.tracksByGuid?.[trackGuid]?.vol);
-    return Number.isFinite(got) ? got : NaN;
+    return getRealVmTrackVol01(norm, trackGuid);
   }
 
   if (k.startsWith("trackPan:")) {
@@ -562,14 +674,18 @@ function resolveContinuousTruthValue01(key, norm) {
       return Number.isFinite(got) ? got : NaN;
     }
 
-    const got = Number(norm?.entities?.tracksByGuid?.[trackGuid]?.pan);
-    return Number.isFinite(got) ? got : NaN;
+    return getRealVmTrackPan01(norm, trackGuid);
   }
 
   if (k.startsWith("busVol:")) {
     const busId = k.slice("busVol:".length);
-    const got = Number(norm?.snapshot?.busMix?.[busId]?.vol);
-    return Number.isFinite(got) ? got : NaN;
+
+    if (isMockVm(norm)) {
+      const got = Number(norm?.snapshot?.busMix?.[busId]?.vol);
+      return Number.isFinite(got) ? got : NaN;
+    }
+
+    return getRealVmBusVol01(norm, busId);
   }
 
   return NaN;
@@ -635,6 +751,7 @@ function computeCollapsedSet(pendingOrder, pendingById) {
   const lastVol = new Map();
   const lastPan = new Map();
   const lastBusVol = new Map();
+  const lastParam = new Map();
 
   for (const opId of pendingOrder) {
     const op = pendingById[opId];
@@ -672,10 +789,20 @@ function computeCollapsedSet(pendingOrder, pendingById) {
     }
 
     if (kind === "setBusVolume") {
-      const k = String(intent.busId || "");
+      const k = normBusId(intent.busId);
       if (!k) continue;
       if (lastBusVol.has(k)) collapsed.add(lastBusVol.get(k));
       lastBusVol.set(k, opId);
+    }
+
+    if (kind === "setParamValue") {
+      const fxGuid = String(intent.fxGuid || "");
+      const paramIdx = Number(intent.paramIdx);
+      if (!fxGuid || !Number.isFinite(paramIdx)) continue;
+
+      const k = `${fxGuid}:${paramIdx}`;
+      if (lastParam.has(k)) collapsed.add(lastParam.get(k));
+      lastParam.set(k, opId);
     }
   }
 

@@ -118,11 +118,12 @@ export function buildOptimistic(state, intent) {
     // ✅ MIX: Bus Volume (0..1)
     // ---------------------------
     case "setBusVolume": {
-      const busId = String(intent?.busId || "");
+      const busId = normBusId(intent?.busId);
       const value = Number(intent?.value ?? 1);
       if (!busId) return null;
       return { bus: { [busId]: { vol: value } } };
     }
+
     case "toggleFx": {
       const { fxGuid, value } = intent || {};
       if (!fxGuid) return null;
