@@ -6,7 +6,6 @@ import { styles, KNOB_STRIP_H } from "./_styles";
 import { useIntent } from "../../../core/useIntent";
 import { useRfxStore } from "../../../core/rfx/Store";
 import { ParamCard } from "./components/ParamCard";
-import { makeMockParamManifestForFx } from "../../../core/transport/MockParameterGenerator";
 import { KnobRow } from "../../../components/controls/knobs/KnobRow";
 
 const EMPTY = Object.freeze({});
@@ -88,9 +87,7 @@ export function PluginView() {
       null
   );
 
-  const [mockManifest, setMockManifest] = React.useState(null);
-
-  const manifest = truthManifest || mockManifest;
+  const manifest = truthManifest;
   const params = Array.isArray(manifest?.params) ? manifest.params : EMPTY_ARR;
 
   const pluginName = String(manifest?.plugin?.fxName || fx?.name || "Plugin");
@@ -129,23 +126,6 @@ export function PluginView() {
 
     intent?.({ name: "getPluginParams", fxGuid });
   }, [fxGuid, truthManifest, intent]);
-
-  React.useEffect(() => {
-    if (truthManifest) {
-      setMockManifest(null);
-      return;
-    }
-    if (!fx) return;
-
-    setMockManifest(
-      makeMockParamManifestForFx({
-        ...fx,
-        id: fxGuid,
-        guid: fxGuid,
-        trackGuid,
-      })
-    );
-  }, [truthManifest, fx, fxGuid, trackGuid]);
 
   const onParamScrub = React.useCallback(
     (p, next01, gestureId) => {

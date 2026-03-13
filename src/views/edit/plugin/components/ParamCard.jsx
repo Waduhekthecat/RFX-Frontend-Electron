@@ -187,10 +187,10 @@ export function ParamCard({
 
   const subtitle = String(liveParam?.name || "").trim();
 
-  const valueText =
-    liveParam?.fmt != null && String(liveParam.fmt).trim() !== ""
-      ? String(liveParam.fmt)
-      : `${Math.round(live01 * 100)}%`;
+  // IMPORTANT:
+  // The slider readout should reflect the rendered value, not stale truth fmt.
+  // So always derive it from live01 (which tracks rendered01).
+  const valueText = `${live01.toFixed(2)}`;
 
   const mapped = Array.isArray(mappedKnobs) && mappedKnobs.length > 0;
   const mappedText = mapped ? `Mapped: ${mappedKnobs.join(", ")}` : "";

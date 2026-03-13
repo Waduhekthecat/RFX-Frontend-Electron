@@ -1,5 +1,5 @@
 import React from "react";
-import { createMockTransport } from "./MockTransport";
+// import { createMockTransport } from "./MockTransport";
 import { createElectronTransport } from "./ElectronTransport";
 import { wrapTransportWithContract } from "./ContractEnforcer";
 
@@ -8,7 +8,7 @@ const TransportCtx = React.createContext(null);
 export function TransportProvider({ children, transport: providedTransport = null }) {
   const transport = React.useMemo(() => {
     const electron = !providedTransport ? createElectronTransport() : null;
-    const raw = providedTransport || electron || createMockTransport();
+    const raw = providedTransport || electron;
 
     return wrapTransportWithContract(raw, {
       name:
