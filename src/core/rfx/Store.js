@@ -453,20 +453,20 @@ export const useRfxStore = create((set, get) => ({
 
       perf: norm.perf
         ? {
-            buses: norm.perf.buses,
-            activeBusId: norm.perf.activeBusId,
-            busModesById:
-              norm.perf.busModesById ?? norm.perf.routingModesById ?? null,
-            metersById: s.meters.byId || s.perf.metersById || null,
+          buses: norm.perf.buses,
+          activeBusId: norm.perf.activeBusId,
+          busModesById:
+            norm.perf.busModesById ?? norm.perf.routingModesById ?? null,
+          metersById: s.meters.byId || s.perf.metersById || null,
 
-            knobValuesByBusId: s.perf.knobValuesByBusId || {},
-            knobMapByBusId: s.perf.knobMapByBusId || {},
-            mappingArmed: s.perf.mappingArmed ?? null,
-          }
+          knobValuesByBusId: s.perf.knobValuesByBusId || {},
+          knobMapByBusId: s.perf.knobMapByBusId || {},
+          mappingArmed: s.perf.mappingArmed ?? null,
+        }
         : {
-            ...s.perf,
-            metersById: s.meters.byId || s.perf.metersById || null,
-          },
+          ...s.perf,
+          metersById: s.meters.byId || s.perf.metersById || null,
+        },
 
       session: {
         ...s.session,
@@ -552,6 +552,13 @@ export const useRfxStore = create((set, get) => ({
 
     const call = coerceToTransportCall(intent);
     if (!call || !call.name) return;
+
+    if (String(call.name) === "removeFx") {
+      const fxGuid = String(call.fxGuid || "");
+      if (fxGuid) {
+        get().unmapFxFromAllBuses({ fxGuid });
+      }
+    }
 
     // ------------------------------------------------------------
     // Continuous preview path: setTrackVolume
@@ -1162,6 +1169,50 @@ export const useRfxStore = create((set, get) => ({
         },
       };
     });
+  },
+
+  unmapFxFromAllBuses: ({ fxGuid }) => {
+    const fx = String(fxGuid || "");
+    if (!fx) return;
+
+    const knobMapByBusId = get().perf?.knobMapByBusId || {};
+    const nextKnobMapByBusId = {};
+    let removed = [];
+
+    for (const [busId, busMap] of Object.entries(knobMapByBusId)) {
+      const nextBusMap = {};
+
+      for (const [knobId, target] of Object.entries(busMap || {})) {
+        if (String(target?.fxGuid || "") === fx) {
+          removed.push({
+            busId,
+            knobId,
+            fxGuid: fx,
+            paramIdx: Number(target?.paramIdx),
+            trackGuid: String(target?.trackGuid || ""),
+          });
+          continue;
+        }
+
+        nextBusMap[knobId] = target;
+      }
+
+      nextKnobMapByBusId[busId] = nextBusMap;
+    }
+
+    if (!removed.length) return;
+
+    get().logEvent("knobmap:fx_unmapped_all", {
+      fxGuid: fx,
+      removed,
+    });
+
+    set((s) => ({
+      perf: {
+        ...s.perf,
+        knobMapByBusId: nextKnobMapByBusId,
+      },
+    }));
   },
 
   // ------------------------------------------------------------

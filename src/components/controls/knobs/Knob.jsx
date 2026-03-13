@@ -29,8 +29,8 @@ function setGlobalDragLock(on) {
 }
 
 // smoothing for EXTERNAL updates only
-const SMOOTH_ALPHA = 0.22;
-const SMOOTH_EPS = 0.0015;
+const SMOOTH_ALPHA = 0.38;
+const SMOOTH_EPS = 0.0008;
 
 export function Knob({
   id,

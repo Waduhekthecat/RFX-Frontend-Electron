@@ -18,10 +18,11 @@ function makeGestureId(prefix = "g") {
 }
 
 const PARAM_SENSITIVITY = 0.0026;
-const SMOOTH_ALPHA = 0.18;
-const SMOOTH_EPS = 0.0015;
+const SMOOTH_ALPHA = 0.38;
+const SMOOTH_EPS = 0.0008;
+const SNAP_EPS = 0.01;
 
-export function ParamCard({
+function ParamCardImpl({
   trackGuid,
   fxGuid,
   p,
@@ -33,56 +34,41 @@ export function ParamCard({
 }) {
   const paramIdx = Number(p?.idx ?? 0);
 
+  // Subscribe only to this param's overlay entry
   const overlayEntry = useRfxStore(
     (s) => s?.ops?.overlay?.fxParamsByGuid?.[fxGuid]?.[paramIdx] ?? null
   );
 
-  const manifest = useRfxStore(
-    (s) =>
-      s?.entities?.fxParamsByGuid?.[fxGuid] ??
-      s?.snapshot?.fxParamsByGuid?.[fxGuid] ??
-      null
-  );
+  // Subscribe only to this param's truth entry, not the whole manifest
+  const truthParam = useRfxStore((s) => {
+    const entityManifest = s?.entities?.fxParamsByGuid?.[fxGuid];
+    const snapManifest = s?.snapshot?.fxParamsByGuid?.[fxGuid];
+    const params = entityManifest?.params ?? snapManifest?.params ?? null;
+    if (!Array.isArray(params)) return null;
 
-  const truthParam = React.useMemo(() => {
-    return (
-      manifest?.params?.find?.((x) => Number(x?.idx) === Number(paramIdx)) ?? null
-    );
-  }, [manifest, paramIdx]);
+    for (let i = 0; i < params.length; i += 1) {
+      const x = params[i];
+      if (Number(x?.idx) === paramIdx) return x;
+    }
+    return null;
+  });
 
   const liveParam = React.useMemo(() => {
     return {
       ...(p || {}),
       ...(truthParam || {}),
       ...(overlayEntry || {}),
-      idx: Number(
-        overlayEntry?.idx ??
-          truthParam?.idx ??
-          p?.idx ??
-          paramIdx
-      ),
+      idx: Number(overlayEntry?.idx ?? truthParam?.idx ?? p?.idx ?? paramIdx),
       value01: clamp01(
-        overlayEntry?.value01 ??
-          truthParam?.value01 ??
-          p?.value01 ??
-          0.5
+        overlayEntry?.value01 ?? truthParam?.value01 ?? p?.value01 ?? 0.5
       ),
     };
   }, [p, truthParam, overlayEntry, paramIdx]);
 
-  // actual REAPER truth only
-  const truth01 = clamp01(
-    truthParam?.value01 ??
-      p?.value01 ??
-      0.5
-  );
+  const truth01 = clamp01(truthParam?.value01 ?? p?.value01 ?? 0.5);
 
-  // rendered target = optimistic overlay if present, otherwise truth
   const rendered01 = clamp01(
-    overlayEntry?.value01 ??
-      truthParam?.value01 ??
-      p?.value01 ??
-      0.5
+    overlayEntry?.value01 ?? truthParam?.value01 ?? p?.value01 ?? 0.5
   );
 
   const [isDragging, setIsDragging] = React.useState(false);
@@ -109,6 +95,11 @@ export function ParamCard({
         const cur = clamp01(prev);
         const tgt = clamp01(targetRef.current);
         const diff = tgt - cur;
+
+        if (Math.abs(diff) <= SNAP_EPS) {
+          rafRef.current = 0;
+          return tgt;
+        }
 
         if (Math.abs(diff) <= SMOOTH_EPS) {
           rafRef.current = 0;
@@ -175,6 +166,7 @@ export function ParamCard({
         gestureIdRef.current = makeGestureId("fxParam");
       }
 
+      // Immediate local ownership during drag
       setLive01(clamped);
       onChange01?.(liveParam || p, clamped, gestureIdRef.current);
     },
@@ -186,10 +178,6 @@ export function ParamCard({
   ).trim();
 
   const subtitle = String(liveParam?.name || "").trim();
-
-  // IMPORTANT:
-  // The slider readout should reflect the rendered value, not stale truth fmt.
-  // So always derive it from live01 (which tracks rendered01).
   const valueText = `${live01.toFixed(2)}`;
 
   const mapped = Array.isArray(mappedKnobs) && mappedKnobs.length > 0;
@@ -250,7 +238,7 @@ export function ParamCard({
 
       <div className="mt-auto pt-2 flex items-center justify-between gap-3 min-w-0">
         <div className="text-[11px] text-white/45 truncate">
-          truth={Math.round(truth01 * 100)}% • rendered={Math.round(rendered01 * 100)}%
+          truth={Math.round(truth01 * 100)} • rendered={Math.round(rendered01 * 100)}
         </div>
         <div className="text-[10px] text-white/30 tabular-nums shrink-0">
           #{paramIdx}
@@ -259,3 +247,16 @@ export function ParamCard({
     </div>
   );
 }
+
+export const ParamCard = React.memo(
+  ParamCardImpl,
+  (prev, next) =>
+    prev.trackGuid === next.trackGuid &&
+    prev.fxGuid === next.fxGuid &&
+    prev.p === next.p &&
+    prev.onChange01 === next.onChange01 &&
+    prev.onCommit01 === next.onCommit01 &&
+    prev.onMap === next.onMap &&
+    prev.onUnmap === next.onUnmap &&
+    prev.mappedKnobs === next.mappedKnobs
+);

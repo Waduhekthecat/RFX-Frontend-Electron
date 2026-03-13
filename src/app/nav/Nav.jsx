@@ -78,7 +78,7 @@ export function Nav() {
       {/* LEFT */}
       <div className={styles.left}>
         <div className={styles.brand}>RFX</div>
-        <div className={styles.env}>Mock</div>
+        <div className={styles.env}>Beta</div>
 
         <div className={styles.divider} />
 

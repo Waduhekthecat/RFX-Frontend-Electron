@@ -1,7 +1,7 @@
 // src/views/edit/plugin/PluginView.jsx
 import React from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Panel, Inset } from "../../../components/ui/Panel";
+import { Panel } from "../../../components/ui/Panel";
 import { styles, KNOB_STRIP_H } from "./_styles";
 import { useIntent } from "../../../core/useIntent";
 import { useRfxStore } from "../../../core/rfx/Store";
@@ -32,9 +32,16 @@ function readFxParam01(sources, fxGuid, paramIdx, fallback01 = 0.5) {
     return clamp01(patch.value01);
   }
 
-  const manifest = snapshotByGuid?.[fxGuid] ?? entitiesByGuid?.[fxGuid];
-  const p = manifest?.params?.find?.((x) => Number(x?.idx) === Number(paramIdx));
-  if (p && Number.isFinite(Number(p.value01))) return clamp01(p.value01);
+  const manifest = entitiesByGuid?.[fxGuid] ?? snapshotByGuid?.[fxGuid];
+  const params = manifest?.params;
+  if (Array.isArray(params)) {
+    for (let i = 0; i < params.length; i += 1) {
+      const x = params[i];
+      if (Number(x?.idx) === Number(paramIdx) && Number.isFinite(Number(x?.value01))) {
+        return clamp01(x.value01);
+      }
+    }
+  }
 
   return clamp01(fallback01);
 }
@@ -240,19 +247,24 @@ export function PluginView() {
             <div className="text-white/45 text-[12px]">Loading parameters…</div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 content-start">
-              {params.map((p) => (
-                <ParamCard
-                  key={p.idx}
-                  trackGuid={trackGuid}
-                  fxGuid={fxGuid}
-                  p={p}
-                  onChange01={onParamScrub}
-                  onCommit01={onParamCommit}
-                  onMap={onMap}
-                  onUnmap={onUnmap}
-                  mappedKnobs={mappedKnobsByParamIdx?.[Number(p.idx)] || []}
-                />
-              ))}
+              {params.map((p) => {
+                const idx = Number(p.idx);
+                const mappedKnobs = mappedKnobsByParamIdx?.[idx] || EMPTY_ARR;
+
+                return (
+                  <ParamCard
+                    key={p.idx}
+                    trackGuid={trackGuid}
+                    fxGuid={fxGuid}
+                    p={p}
+                    onChange01={onParamScrub}
+                    onCommit01={onParamCommit}
+                    onMap={onMap}
+                    onUnmap={onUnmap}
+                    mappedKnobs={mappedKnobs}
+                  />
+                );
+              })}
             </div>
           )}
         </div>
