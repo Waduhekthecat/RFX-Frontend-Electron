@@ -11,8 +11,6 @@ local function now_ms()
   return math.floor(reaper.time_precise() * 1000)
 end
 
-local lastTickLog = 0
-
 local function read_file(path)
   local f = io.open(path, "r")
   if not f then return nil end
@@ -64,6 +62,37 @@ end
 
 local function log_error(msg)
   append_file(get_ipc_dir() .. "/commandwatcher_error.log", "[" .. tostring(now_ms()) .. "] " .. tostring(msg) .. "\n")
+end
+
+local function clamp01(n)
+  local v = tonumber(n) or 0
+  if v < 0 then return 0 end
+  if v > 1 then return 1 end
+  return v
+end
+
+local function normalize_param_name(s)
+  s = tostring(s or ""):lower()
+  s = s:gsub("%s+", " ")
+  s = s:gsub("^%s+", "")
+  s = s:gsub("%s+$", "")
+  return s
+end
+
+local function should_include_param(paramName)
+  local s = tostring(paramName or "")
+  local trimmed = s:gsub("^%s+", "")
+  local lower = trimmed:lower()
+  return not lower:match("^midi")
+end
+
+local lastTickLog = 0
+local pending_vm_export = false
+
+local function request_vm_export(reason)
+  pending_vm_export = true
+  local why = tostring(reason or "unknown")
+  append_file(get_ipc_dir() .. "/watcher_debug.log", "[" .. tostring(now_ms()) .. "] request_vm_export reason=" .. why .. "\n")
 end
 
 local function write_heartbeat()
@@ -202,9 +231,130 @@ local function find_fx_index_by_guid(track, targetGuid)
   return nil
 end
 
+local function fx_params_cache_path()
+  return get_ipc_dir() .. "/fx_params_cache.json"
+end
+
+local function read_fx_params_cache()
+  local data, _err = read_json(fx_params_cache_path())
+  if not data or type(data) ~= "table" then
+    return {}
+  end
+  return data
+end
+
+local function write_fx_params_cache(cache)
+  return write_json(fx_params_cache_path(), cache or {})
+end
+
+local function remove_fx_from_params_cache(fxGuid)
+  fxGuid = tostring(fxGuid or "")
+  if fxGuid == "" then return true end
+
+  local cache = read_fx_params_cache()
+  if type(cache) ~= "table" then
+    cache = {}
+  end
+
+  cache[fxGuid] = nil
+  return write_fx_params_cache(cache)
+end
+
+local function find_track_and_fx_index_by_fx_guid(targetGuid)
+  targetGuid = tostring(targetGuid or "")
+  if targetGuid == "" then return nil, nil end
+
+  local trackCount = reaper.CountTracks(0)
+  for i = 0, trackCount - 1 do
+    local tr = reaper.GetTrack(0, i)
+    local fxCount = reaper.TrackFX_GetCount(tr)
+    for fxIndex = 0, fxCount - 1 do
+      local fxGuid = reaper.TrackFX_GetFXGUID(tr, fxIndex)
+      if tostring(fxGuid or "") == targetGuid then
+        return tr, fxIndex
+      end
+    end
+  end
+
+  return nil, nil
+end
+
+local function refresh_fx_params_cache_entry(fxGuid)
+  fxGuid = tostring(fxGuid or "")
+  if fxGuid == "" then
+    return false, "missing fxGuid"
+  end
+
+  local tr, fxIndex = find_track_and_fx_index_by_fx_guid(fxGuid)
+  if not tr or fxIndex == nil then
+    return false, "fx not found: " .. fxGuid
+  end
+
+  local paramCount = reaper.TrackFX_GetNumParams(tr, fxIndex)
+  local params = {}
+
+  for paramIdx = 0, paramCount - 1 do
+    local _, paramName = reaper.TrackFX_GetParamName(tr, fxIndex, paramIdx, "")
+
+    if should_include_param(paramName) then
+      local value01 = reaper.TrackFX_GetParamNormalized(tr, fxIndex, paramIdx)
+
+      local fmt = ""
+      if reaper.TrackFX_GetFormattedParamValue then
+        local okFmt, formatted = pcall(function()
+          local _, s = reaper.TrackFX_GetFormattedParamValue(tr, fxIndex, paramIdx, "")
+          return s
+        end)
+        if okFmt and formatted then
+          fmt = tostring(formatted)
+        end
+      end
+
+      params[#params + 1] = {
+        idx = paramIdx,
+        name = tostring(paramName or ("Param " .. tostring(paramIdx + 1))),
+        nameNorm = normalize_param_name(paramName or ("Param " .. tostring(paramIdx + 1))),
+        value01 = clamp01(tonumber(value01) or 0),
+        fmt = tostring(fmt or ""),
+      }
+    end
+  end
+
+  local cache = read_fx_params_cache()
+  cache[fxGuid] = {
+    fxGuid = fxGuid,
+    params = params,
+    ts = now_ms(),
+  }
+
+  local okWrite = write_fx_params_cache(cache)
+  if not okWrite then
+    return false, "failed to write fx_params_cache.json"
+  end
+
+  return true
+end
+
+-- local function exec_syncView(_payload)
+ -- request_vm_export("syncView")
+ -- return true
+--end
 local function exec_syncView(_payload)
+  local ts = now_ms()
+
+  reaper.ShowConsoleMsg("[RFX] SYNCVIEW FROM RFX ts=" .. tostring(ts) .. "\n")
+  log_debug("SYNCVIEW FROM RFX ts=" .. tostring(ts))
+
   local ok = exporter.export_vm()
-  if not ok then return false, "export_vm failed" end
+
+  if not ok then
+    reaper.ShowConsoleMsg("[RFX] SYNCVIEW export_vm FAILED ts=" .. tostring(now_ms()) .. "\n")
+    log_error("SYNCVIEW export_vm failed ts=" .. tostring(now_ms()))
+    return false, "syncView export_vm failed"
+  end
+
+  reaper.ShowConsoleMsg("[RFX] SYNCVIEW export_vm WROTE vm.json ts=" .. tostring(now_ms()) .. "\n")
+  log_debug("SYNCVIEW export_vm wrote vm.json ts=" .. tostring(now_ms()))
   return true
 end
 
@@ -226,8 +376,7 @@ local function exec_selectActiveBus(payload)
     return false, "state saved but routing apply failed: " .. tostring(routingErr or "")
   end
 
-  local ok = exporter.export_vm()
-  if not ok then return false, "state saved but export_vm failed" end
+  request_vm_export("selectActiveBus")
   return true
 end
 
@@ -254,8 +403,7 @@ local function exec_setRoutingMode(payload)
     return false, "state saved but routing apply failed: " .. tostring(routingErr or "")
   end
 
-  local ok = exporter.export_vm()
-  if not ok then return false, "state saved but export_vm failed" end
+  request_vm_export("setRoutingMode")
   return true
 end
 
@@ -284,7 +432,6 @@ local function find_matching_installed_fx_raw(targetRaw)
       return raw
     end
 
-    -- JS fallback: match path-qualified names by suffix
     if targetLower:match("^js:%s*") and rawLower:match("^js:%s*") then
       local targetTail = targetLower:gsub("^js:%s*", "")
       local rawTail = rawLower:gsub("^js:%s*", "")
@@ -326,7 +473,6 @@ local function exec_addFx(payload)
   local beforeCount = reaper.TrackFX_GetCount(tr)
   log_debug("exec_addFx beforeCount=" .. tostring(beforeCount))
 
-  -- Do the real add attempt directly
   local fxIndex = reaper.TrackFX_AddByName(tr, resolvedRaw, false, 1)
   log_debug("exec_addFx TrackFX_AddByName result fxIndex=" .. tostring(fxIndex))
   log_debug("exec_addFx resolvedRaw=" .. tostring(resolvedRaw))
@@ -340,10 +486,18 @@ local function exec_addFx(payload)
 
   local _, fxName = reaper.TrackFX_GetFXName(tr, fxIndex, "")
   local _, trName = reaper.GetTrackName(tr)
-  local resolvedFxGuid = trName .. "::fx::" .. tostring(fxIndex) .. "::" .. tostring(fxName)
+  local resolvedFxGuid = reaper.TrackFX_GetFXGUID(tr, fxIndex)
+  if not resolvedFxGuid or resolvedFxGuid == "" then
+    resolvedFxGuid = trName .. "::fx::" .. tostring(fxIndex) .. "::" .. tostring(fxName)
+  end
 
   log_debug("exec_addFx added fxName=" .. tostring(fxName))
   log_debug("exec_addFx resolved fxGuid=" .. tostring(resolvedFxGuid))
+
+  local okRefresh, refreshErr = refresh_fx_params_cache_entry(resolvedFxGuid)
+  if not okRefresh then
+    log_debug("exec_addFx param cache refresh skipped/failed: " .. tostring(refreshErr or "unknown"))
+  end
 
   local ok = exporter.export_vm()
   if not ok then
@@ -380,8 +534,12 @@ local function exec_removeFx(payload)
 
   reaper.TrackFX_Delete(tr, fxIndex)
 
-  local ok = exporter.export_vm()
-  if not ok then return false, "fx removed but export_vm failed" end
+  local okCache = remove_fx_from_params_cache(fxGuid)
+  if not okCache then
+    return false, "fx removed but failed to update fx_params_cache.json"
+  end
+
+  request_vm_export("removeFx")
   return true
 end
 
@@ -414,11 +572,7 @@ local function exec_toggleFx(payload)
 
   reaper.TrackFX_SetEnabled(tr, fxIndex, value)
 
-  local ok = exporter.export_vm()
-  if not ok then
-    return false, "fx toggled but export_vm failed"
-  end
-
+  request_vm_export("toggleFx")
   return true
 end
 
@@ -438,14 +592,57 @@ local function exec_reorderFx(payload)
 
   reaper.TrackFX_CopyToTrack(tr, fromIndex, tr, toIndex, true)
 
-  local ok = exporter.export_vm()
-  if not ok then return false, "fx reordered but export_vm failed" end
+  request_vm_export("reorderFx")
   return true
 end
 
-local function exec_getPluginParams(_payload)
-  local ok = exporter.export_vm()
-  if not ok then return false, "export_vm failed" end
+local function exec_getPluginParams(payload)
+  local fxGuid = tostring(payload.fxGuid or "")
+  if fxGuid == "" then
+    return false, "missing fxGuid"
+  end
+
+  log_debug("exec_getPluginParams begin fxGuid=" .. tostring(fxGuid))
+
+  local okRefresh, refreshErr = refresh_fx_params_cache_entry(fxGuid)
+  if not okRefresh then
+    return false, tostring(refreshErr or "failed to refresh fx params cache")
+  end
+
+  request_vm_export("getPluginParams")
+  return true
+end
+
+local function exec_setParamValue(payload)
+  local fxGuid = tostring(payload.fxGuid or "")
+  local paramIdx = tonumber(payload.paramIdx)
+  local value01 = tonumber(payload.value01)
+
+  if fxGuid == "" then
+    return false, "missing fxGuid"
+  end
+  if paramIdx == nil then
+    return false, "missing paramIdx"
+  end
+  if value01 == nil then
+    return false, "missing value01"
+  end
+
+  value01 = clamp01(value01)
+
+  local tr, fxIndex = find_track_and_fx_index_by_fx_guid(fxGuid)
+  if not tr or fxIndex == nil then
+    return false, "fx not found: " .. fxGuid
+  end
+
+  reaper.TrackFX_SetParamNormalized(tr, fxIndex, paramIdx, value01)
+
+  local okRefresh, refreshErr = refresh_fx_params_cache_entry(fxGuid)
+  if not okRefresh then
+    return false, "param set but cache refresh failed: " .. tostring(refreshErr or "")
+  end
+
+  request_vm_export("setParamValue")
   return true
 end
 
@@ -477,6 +674,8 @@ local function execute_command(cmd)
     return exec_reorderFx(payload)
   elseif name == "getPluginParams" then
     return exec_getPluginParams(payload)
+  elseif name == "setParamValue" then
+    return exec_setParamValue(payload)
   elseif name == "refreshInstalledPlugins" then
     return exec_refreshInstalledPlugins(payload)
   end
@@ -490,6 +689,17 @@ local function process_once()
     lastTickLog = t
     log_debug("loop tick")
     write_heartbeat()
+  end
+
+  if pending_vm_export then
+    pending_vm_export = false
+
+    local okVm = exporter.export_vm()
+    if okVm then
+      log_debug("deferred export_vm() success")
+    else
+      log_error("deferred export_vm() failed")
+    end
   end
 
   local cmdPath = get_ipc_dir() .. "/cmd.json"
@@ -510,16 +720,29 @@ local function process_once()
     else
       local cmd = cmdOrErr
 
-      log_debug("Received command: " .. tostring(cmd.name or "") .. " id=" .. tostring(cmd.id or ""))
-
+      local cmdName = tostring(cmd.name or "")
+      local cmdId = tostring(cmd.id or "")
+      
+      log_debug("Received command: " .. cmdName .. " id=" .. cmdId)
+      reaper.ShowConsoleMsg("[RFX] CMD received name=" .. cmdName .. " id=" .. cmdId .. "\n")
+      
       local okExec, okFlag, err = pcall(execute_command, cmd)
-
+      
       if okExec then
         write_result(cmd.id, cmd.name, okFlag, err)
         log_debug("Command result: ok=" .. tostring(okFlag) .. " err=" .. tostring(err or ""))
+        reaper.ShowConsoleMsg(
+          "[RFX] CMD result name=" .. cmdName ..
+          " ok=" .. tostring(okFlag) ..
+          " err=" .. tostring(err or "") .. "\n"
+        )
       else
         write_result(cmd.id, cmd.name, false, "runtime error: " .. tostring(okFlag))
         log_error("Runtime error while executing command: " .. tostring(okFlag))
+        reaper.ShowConsoleMsg(
+          "[RFX] CMD runtime error name=" .. cmdName ..
+          " err=" .. tostring(okFlag) .. "\n"
+        )
       end
 
       delete_file(cmdPath)

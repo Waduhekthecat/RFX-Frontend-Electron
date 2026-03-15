@@ -288,7 +288,7 @@ function TrackDetailCard({ trackGuid, intent }) {
   function toggleFx(fxId) {
     const fx = chain.find((x) => x.id === fxId);
     const nextEnabled = fx ? !fx.enabled : true;
-    intent?.({ name: "toggleFx", fxGuid: fxId, value: nextEnabled });
+    intent?.({ name: "toggleFx", fxGuid: fxId, trackGuid: tg, value: nextEnabled });
   }
 
   function removeFx(fxId) {
