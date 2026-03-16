@@ -14,13 +14,9 @@ import {
 } from "./Continuous";
 
 const MAX_EVENT_LOG = 300;
-
-// Stable empty refs to avoid useSyncExternalStore infinite-loop traps
+const MAX_TARGETS_PER_KNOB = 3;
 const EMPTY_ARR = Object.freeze([]);
 
-// ---------------------------
-// Event log helpers
-// ---------------------------
 function pushBounded(list, item, max = MAX_EVENT_LOG) {
   const next = [...(list || []), item];
   if (next.length <= max) return next;
@@ -67,9 +63,6 @@ function summarizeTransitions(prevPendingById, nextPendingById, idsInOrder) {
   return out;
 }
 
-// ---------------------------
-// Overlay merge
-// ---------------------------
 function mergeOverlay(base, patch) {
   if (!patch) return base;
   return {
@@ -91,14 +84,12 @@ function mergeFxParamsOverlay(base, patch) {
   if (!patch || typeof patch !== "object") return base || {};
 
   const next = { ...(base || {}) };
-
   for (const fxGuid of Object.keys(patch)) {
     next[fxGuid] = {
       ...((base || {})[fxGuid] || {}),
       ...(patch[fxGuid] || {}),
     };
   }
-
   return next;
 }
 
@@ -109,15 +100,11 @@ function coerceToTransportCall(intent) {
   return null;
 }
 
-// ---------------------------
-// Meters helpers
-// ---------------------------
 function mergeMetersById(prev, next) {
   if (!next || typeof next !== "object") return prev || {};
   return { ...(prev || {}), ...next };
 }
 
-// Accept either { metersById } or { metersByBusId } frames
 function coerceMetersFrame(frame) {
   const f = frame || {};
   const metersById = f.metersById || f.metersByBusId || f.metersByBus || null;
@@ -135,6 +122,15 @@ function clamp01(n) {
   if (v < 0) return 0;
   if (v > 1) return 1;
   return v;
+}
+
+function normalizeRange01(min01, max01, fallbackMin = 0, fallbackMax = 1) {
+  const a = clamp01(min01 ?? fallbackMin);
+  const b = clamp01(max01 ?? fallbackMax);
+  return {
+    min01: Math.min(a, b),
+    max01: Math.max(a, b),
+  };
 }
 
 function isTrackVolumePreviewCall(call) {
@@ -208,16 +204,84 @@ async function trySendFxParamValueOsc(transport, payload) {
   throw new Error("transport osc.sendFxParamValue not wired");
 }
 
+function getKnobTargets(mapForBus, knobId) {
+  const raw = mapForBus?.[knobId];
+  if (!raw) return [];
+  return Array.isArray(raw) ? raw : [raw];
+}
+
+function makeKnobTarget(payload) {
+  const sourceRange = normalizeRange01(
+    payload.sourceMin01 ?? 0,
+    payload.sourceMax01 ?? 1,
+    0,
+    1
+  );
+
+  const targetRange = normalizeRange01(
+    payload.targetMin01 ?? 0,
+    payload.targetMax01 ?? 1,
+    0,
+    1
+  );
+
+  return {
+    busId: String(payload.busId || ""),
+    knobId: String(payload.knobId || ""),
+    trackGuid: String(payload.trackGuid || ""),
+    fxGuid: String(payload.fxGuid || ""),
+    paramIdx: Number(payload.paramIdx),
+    paramName: payload.paramName || payload.label || undefined,
+    fxName: payload.fxName || undefined,
+    trackName: payload.trackName || undefined,
+
+    sourceMin01: sourceRange.min01,
+    sourceMax01: sourceRange.max01,
+    targetMin01: targetRange.min01,
+    targetMax01: targetRange.max01,
+    invert: payload.invert === true,
+  };
+}
+
+function sanitizeKnobTargetPatch(prevTarget, patch) {
+  const next = { ...(prevTarget || {}), ...(patch || {}) };
+
+  const sourceRange = normalizeRange01(
+    next.sourceMin01 ?? 0,
+    next.sourceMax01 ?? 1,
+    0,
+    1
+  );
+
+  const targetRange = normalizeRange01(
+    next.targetMin01 ?? 0,
+    next.targetMax01 ?? 1,
+    0,
+    1
+  );
+
+  return {
+    ...next,
+    sourceMin01: sourceRange.min01,
+    sourceMax01: sourceRange.max01,
+    targetMin01: targetRange.min01,
+    targetMax01: targetRange.max01,
+    invert: next.invert === true,
+  };
+}
+
+function sameTarget(a, b) {
+  return (
+    String(a?.trackGuid || "") === String(b?.trackGuid || "") &&
+    String(a?.fxGuid || "") === String(b?.fxGuid || "") &&
+    Number(a?.paramIdx) === Number(b?.paramIdx)
+  );
+}
+
 export const useRfxStore = create((set, get) => ({
-  // ---------------------------
-  // Wiring: we will call transport.syscall(call)
-  // ---------------------------
   transport: null,
   setTransport: (transport) => set({ transport }),
 
-  // ---------------------------
-  // Snapshot meta
-  // ---------------------------
   snapshot: {
     seq: 0,
     schema: "none",
@@ -233,33 +297,22 @@ export const useRfxStore = create((set, get) => ({
   transportState: null,
   selection: { selectedTrackIndex: -1 },
 
-  // ---------------------------
-  // Normalized entities
-  // ---------------------------
   entities: {
     tracksByGuid: {},
     trackOrder: [],
-
     fxByGuid: {},
     fxOrderByTrackGuid: {},
     fxParamsByGuid: {},
-
     routesById: {},
     routeIdsByTrackGuid: {},
   },
 
-  // ---------------------------
-  // Telemetry: meters (fast path, not seq-bearing)
-  // ---------------------------
   meters: {
     byId: {},
     lastAtMs: 0,
     activeBusId: null,
   },
 
-  // ---------------------------
-  // Perf-ish / VM compatibility
-  // ---------------------------
   perf: {
     buses: null,
     activeBusId: null,
@@ -270,18 +323,12 @@ export const useRfxStore = create((set, get) => ({
     mappingArmed: null,
   },
 
-  // ---------------------------
-  // RFX-owned session state
-  // ---------------------------
   session: {
     activeTrackGuid: null,
     selectedTrackGuid: null,
     selectedFxGuid: null,
   },
 
-  // ---------------------------
-  // Pending operations + overlay
-  // ---------------------------
   ops: {
     pendingById: {},
     pendingOrder: [],
@@ -296,14 +343,8 @@ export const useRfxStore = create((set, get) => ({
     eventLog: [],
   },
 
-  // ---------------------------
-  // Continuous overlay state
-  // ---------------------------
   continuous: createContinuousOverlayState(),
 
-  // ---------------------------
-  // Continuous overlay actions
-  // ---------------------------
   beginContinuous: (key, gestureId, value01) =>
     set((s) => ({
       continuous: beginContinuousOverlay(s.continuous, key, gestureId, value01),
@@ -324,9 +365,6 @@ export const useRfxStore = create((set, get) => ({
       continuous: clearContinuousOverlay(s.continuous, key, gestureId),
     })),
 
-  // ============================================================
-  // Event log API
-  // ============================================================
   logEvent: (kind, data, meta) => {
     const entry = {
       t: nowMs(),
@@ -343,9 +381,6 @@ export const useRfxStore = create((set, get) => ({
     set((s) => ({ ops: { ...s.ops, eventLog: [] } }));
   },
 
-  // ============================================================
-  // Selectors (helpers)
-  // ============================================================
   selectTrackEffective: (trackGuid) => {
     const st = get();
     const base = st.entities.tracksByGuid[trackGuid];
@@ -354,7 +389,6 @@ export const useRfxStore = create((set, get) => ({
     return patch ? { ...base, ...patch } : base;
   },
 
-  // IMPORTANT: never return a fresh [] (causes useSyncExternalStore loops)
   selectFxOrderEffective: (trackGuid) => {
     const st = get();
     return (
@@ -372,9 +406,59 @@ export const useRfxStore = create((set, get) => ({
     return patch ? { ...base, ...patch } : base;
   },
 
-  // ============================================================
-  // Ingest meters telemetry (Transport -> Store telemetry slice)
-  // ============================================================
+  ingestCmdResult: (resLike) => {
+    const res = resLike || {};
+    const name = String(res?.name || "");
+    const ok = res?.ok === true;
+    const err = String(res?.error || "");
+
+    set((s) => {
+      const pendingById = { ...(s.ops?.pendingById || {}) };
+      const pendingOrder = Array.isArray(s.ops?.pendingOrder) ? s.ops.pendingOrder : [];
+
+      let changed = false;
+
+      for (const opId of pendingOrder) {
+        const op = pendingById[opId];
+        if (!op) continue;
+
+        const kind = String(
+          op?.kind || op?.intent?.name || op?.syscallCall?.name || ""
+        );
+
+        if (kind !== name) continue;
+        if (op.status !== "sent" && op.status !== "queued") continue;
+
+        pendingById[opId] = {
+          ...op,
+          status: ok ? "acked" : "failed",
+          ackSeq: Number(s.snapshot?.seq || 0),
+          error: ok ? null : (err || "command failed"),
+          verify: {
+            ok,
+            reason: ok ? `${name} acknowledged from cmd result` : (err || `${name} failed`),
+            checkedSeq: Number(s.snapshot?.seq || 0),
+          },
+        };
+
+        changed = true;
+      }
+
+      if (!changed) return {};
+
+      return {
+        ops: {
+          ...s.ops,
+          pendingById,
+          pendingOrder: pendingOrder.filter((opId) => {
+            const op = pendingById[opId];
+            return op && op.status !== "acked" && op.status !== "failed";
+          }),
+        },
+      };
+    });
+  },
+
   ingestMeters: (frameLike) => {
     const f = coerceMetersFrame(frameLike);
     if (!f.metersById) return;
@@ -385,8 +469,6 @@ export const useRfxStore = create((set, get) => ({
         lastAtMs: f.t || nowMs(),
         activeBusId: f.activeBusId ?? s.meters.activeBusId ?? null,
       },
-
-      // Keep compatibility: perf.metersById always reflects telemetry meters
       perf: {
         ...s.perf,
         metersById: mergeMetersById(s.perf.metersById, f.metersById),
@@ -394,9 +476,6 @@ export const useRfxStore = create((set, get) => ({
     }));
   },
 
-  // ============================================================
-  // Ingest snapshot (Transport -> Core)
-  // ============================================================
   ingestSnapshot: (viewJsonOrVm) => {
     const receivedAtMs = nowMs();
     const norm = normalize(viewJsonOrVm);
@@ -429,7 +508,6 @@ export const useRfxStore = create((set, get) => ({
     else selectedGuid = null;
 
     let activeGuid = prev.session.activeTrackGuid;
-
     if (activeGuid && !norm.entities.tracksByGuid[activeGuid]) activeGuid = null;
     if (!activeGuid) activeGuid = selectedGuid || norm.entities.trackOrder[0] || null;
 
@@ -458,7 +536,6 @@ export const useRfxStore = create((set, get) => ({
           busModesById:
             norm.perf.busModesById ?? norm.perf.routingModesById ?? null,
           metersById: s.meters.byId || s.perf.metersById || null,
-
           knobValuesByBusId: s.perf.knobValuesByBusId || {},
           knobMapByBusId: s.perf.knobMapByBusId || {},
           mappingArmed: s.perf.mappingArmed ?? null,
@@ -542,12 +619,8 @@ export const useRfxStore = create((set, get) => ({
     }
   },
 
-  // ============================================================
-  // Mutation pipeline entrypoint (UI -> Core)
-  // ============================================================
   dispatchIntent: async (intent) => {
     const transport = get().transport;
-
     get().logEvent("intent:received", intent, null);
 
     const call = coerceToTransportCall(intent);
@@ -560,9 +633,6 @@ export const useRfxStore = create((set, get) => ({
       }
     }
 
-    // ------------------------------------------------------------
-    // Continuous preview path: setTrackVolume
-    // ------------------------------------------------------------
     if (isTrackVolumePreviewCall(call)) {
       const trackGuid = String(call.trackGuid || "");
       const gestureId = String(call.gestureId || "");
@@ -593,13 +663,9 @@ export const useRfxStore = create((set, get) => ({
           null
         );
       }
-
       return;
     }
 
-    // ------------------------------------------------------------
-    // Continuous preview path: setTrackPan
-    // ------------------------------------------------------------
     if (isTrackPanPreviewCall(call)) {
       const trackGuid = String(call.trackGuid || "");
       const gestureId = String(call.gestureId || "");
@@ -630,13 +696,9 @@ export const useRfxStore = create((set, get) => ({
           null
         );
       }
-
       return;
     }
 
-    // ------------------------------------------------------------
-    // Preview path: setParamValue
-    // ------------------------------------------------------------
     if (isParamValuePreviewCall(call)) {
       const fxGuid = String(call.fxGuid || "");
       const paramIdx = Number(call.paramIdx);
@@ -683,7 +745,14 @@ export const useRfxStore = create((set, get) => ({
 
         get().logEvent(
           "osc:fxParam:preview",
-          { trackGuid, fxGuid, fxIndex, paramIdx, value01, gestureId: call.gestureId || null },
+          {
+            trackGuid,
+            fxGuid,
+            fxIndex,
+            paramIdx,
+            value01,
+            gestureId: call.gestureId || null,
+          },
           null
         );
       } catch (err) {
@@ -702,13 +771,9 @@ export const useRfxStore = create((set, get) => ({
           null
         );
       }
-
       return;
     }
 
-    // ------------------------------------------------------------
-    // Continuous commit path setup: setTrackVolume / setTrackPan
-    // ------------------------------------------------------------
     const isTrackVolCommit = isTrackVolumeCommitCall(call);
     const isTrackPanCommit = isTrackPanCommitCall(call);
     const isParamCommit = isParamValueCommitCall(call);
@@ -726,11 +791,7 @@ export const useRfxStore = create((set, get) => ({
 
       try {
         await trySendTrackVolumeOsc(transport, trackGuid, value);
-        get().logEvent(
-          "osc:trackVolume:commit",
-          { trackGuid, value, gestureId },
-          null
-        );
+        get().logEvent("osc:trackVolume:commit", { trackGuid, value, gestureId }, null);
       } catch (err) {
         get().logEvent(
           "osc:error",
@@ -760,11 +821,7 @@ export const useRfxStore = create((set, get) => ({
 
       try {
         await trySendTrackPanOsc(transport, trackGuid, value);
-        get().logEvent(
-          "osc:trackPan:commit",
-          { trackGuid, value, gestureId },
-          null
-        );
+        get().logEvent("osc:trackPan:commit", { trackGuid, value, gestureId }, null);
       } catch (err) {
         get().logEvent(
           "osc:error",
@@ -843,7 +900,6 @@ export const useRfxStore = create((set, get) => ({
     const opId = uid("op");
     const createdAtMs = nowMs();
 
-    // Continuous controls already have their own overlay layer.
     let optimistic = null;
     if (!isTrackVolCommit && !isTrackPanCommit) {
       try {
@@ -898,11 +954,7 @@ export const useRfxStore = create((set, get) => ({
         },
       }));
 
-      get().logEvent(
-        "syscall:error",
-        { kind: syscallCall.name, error: "no transport" },
-        { opId }
-      );
+      get().logEvent("syscall:error", { kind: syscallCall.name, error: "no transport" }, { opId });
       return;
     }
 
@@ -966,8 +1018,6 @@ export const useRfxStore = create((set, get) => ({
           );
         }
       }
-
-      // ack happens when snapshots come in and reconcilePending verifies fields
     } catch (err) {
       const msg = String(err?.message || err);
 
@@ -990,9 +1040,6 @@ export const useRfxStore = create((set, get) => ({
     }
   },
 
-  // ------------------------------------------------------------
-  // Perf knob mapping helpers (RFX-owned, no transport)
-  // ------------------------------------------------------------
   armKnobMapping: (payload) => {
     const p = payload || {};
     const busId = String(p.busId || "");
@@ -1035,6 +1082,12 @@ export const useRfxStore = create((set, get) => ({
           fxName: p.fxName ? String(p.fxName) : undefined,
           trackName: p.trackName ? String(p.trackName) : undefined,
           paramName: p.paramName ? String(p.paramName) : undefined,
+
+          sourceMin01: clamp01(p.sourceMin01 ?? 0),
+          sourceMax01: clamp01(p.sourceMax01 ?? 1),
+          targetMin01: clamp01(p.targetMin01 ?? 0),
+          targetMax01: clamp01(p.targetMax01 ?? 1),
+          invert: p.invert === true,
         },
       },
     }));
@@ -1056,37 +1109,152 @@ export const useRfxStore = create((set, get) => ({
       return;
     }
 
+    const target = makeKnobTarget(p);
     const m = knobId.match(/_k(\d+)$/);
     const knobIndex = m ? Number(m[1]) : null;
 
-    const target = {
-      busId,
-      knobId,
-      trackGuid,
-      fxGuid,
-      paramIdx,
-      paramName: p.paramName || p.label || undefined,
-      fxName: p.fxName || undefined,
-      trackName: p.trackName || undefined,
-    };
+    set((s) => {
+      const knobMapByBusId = s.perf.knobMapByBusId || {};
+      const busMap = knobMapByBusId[busId] || {};
+      const prevTargets = getKnobTargets(busMap, knobId);
 
-    get().logEvent("knobmap:committed", {
-      ...target,
-      knobIndex,
-    });
+      if (prevTargets.some((t) => sameTarget(t, target))) {
+        return s;
+      }
 
-    set((s) => ({
-      perf: {
-        ...s.perf,
-        knobMapByBusId: {
-          ...(s.perf.knobMapByBusId || {}),
-          [busId]: {
-            ...((s.perf.knobMapByBusId || {})[busId] || {}),
-            [knobId]: target,
+      if (prevTargets.length >= MAX_TARGETS_PER_KNOB) {
+        get().logEvent("knobmap:commit_rejected_full", {
+          busId,
+          knobId,
+          knobIndex,
+          max: MAX_TARGETS_PER_KNOB,
+          attempted: target,
+        });
+        return s;
+      }
+
+      const nextTargets = [...prevTargets, target];
+
+      get().logEvent("knobmap:committed", {
+        ...target,
+        knobIndex,
+        targetCount: nextTargets.length,
+      });
+
+      return {
+        perf: {
+          ...s.perf,
+          knobMapByBusId: {
+            ...knobMapByBusId,
+            [busId]: {
+              ...busMap,
+              [knobId]: nextTargets,
+            },
           },
         },
-      },
-    }));
+      };
+    });
+  },
+
+  updateKnobMappingTarget: ({ busId, knobId, fxGuid, paramIdx, patch }) => {
+    const b = String(busId || "");
+    const k = String(knobId || "");
+    const fx = String(fxGuid || "");
+    const idx = Number(paramIdx);
+
+    if (!b || !k || !fx || !Number.isFinite(idx)) return;
+
+    set((s) => {
+      const knobMapByBusId = s.perf.knobMapByBusId || {};
+      const busMap = knobMapByBusId[b] || {};
+      const prevTargets = getKnobTargets(busMap, k);
+
+      if (!prevTargets.length) return s;
+
+      let changed = false;
+      const nextTargets = prevTargets.map((t) => {
+        if (
+          String(t?.fxGuid || "") !== fx ||
+          Number(t?.paramIdx) !== idx
+        ) {
+          return t;
+        }
+
+        changed = true;
+        return sanitizeKnobTargetPatch(t, patch);
+      });
+
+      if (!changed) return s;
+
+      get().logEvent("knobmap:target_updated", {
+        busId: b,
+        knobId: k,
+        fxGuid: fx,
+        paramIdx: idx,
+        patch: patch || null,
+      });
+
+      return {
+        perf: {
+          ...s.perf,
+          knobMapByBusId: {
+            ...knobMapByBusId,
+            [b]: {
+              ...busMap,
+              [k]: nextTargets,
+            },
+          },
+        },
+      };
+    });
+  },
+
+  removeKnobMappingTarget: ({ busId, knobId, fxGuid, paramIdx }) => {
+    const b = String(busId || "");
+    const k = String(knobId || "");
+    const fx = String(fxGuid || "");
+    const idx = Number(paramIdx);
+
+    if (!b || !k || !fx || !Number.isFinite(idx)) return;
+
+    set((s) => {
+      const knobMapByBusId = s.perf.knobMapByBusId || {};
+      const busMap = knobMapByBusId[b] || {};
+      const prevTargets = getKnobTargets(busMap, k);
+
+      if (!prevTargets.length) return s;
+
+      const nextTargets = prevTargets.filter(
+        (t) =>
+          !(
+            String(t?.fxGuid || "") === fx &&
+            Number(t?.paramIdx) === idx
+          )
+      );
+
+      if (nextTargets.length === prevTargets.length) return s;
+
+      const nextBusMap = { ...busMap };
+      if (nextTargets.length > 0) nextBusMap[k] = nextTargets;
+      else delete nextBusMap[k];
+
+      get().logEvent("knobmap:target_removed", {
+        busId: b,
+        knobId: k,
+        fxGuid: fx,
+        paramIdx: idx,
+      });
+
+      return {
+        perf: {
+          ...s.perf,
+          knobMapByBusId: {
+            ...knobMapByBusId,
+            [b]: nextBusMap,
+          },
+        },
+      };
+    });
   },
 
   setKnobValueLocal: ({ busId, knobId, value01 }) => {
@@ -1141,23 +1309,28 @@ export const useRfxStore = create((set, get) => ({
     const idx = Number(paramIdx);
     if (!b || !fx || !Number.isFinite(idx)) return;
 
-    const busMap = get().perf?.knobMapByBusId?.[b] || {};
-    const toRemove = Object.entries(busMap)
-      .filter(([, t]) => String(t?.fxGuid || "") === fx && Number(t?.paramIdx) === idx)
-      .map(([knobId]) => knobId);
-
-    if (!toRemove.length) return;
-
-    get().logEvent("knobmap:param_unmapped", {
-      busId: b,
-      fxGuid: fx,
-      paramIdx: idx,
-      knobs: toRemove,
-    });
+    const removed = [];
 
     set((s) => {
-      const nextBusMap = { ...((s.perf.knobMapByBusId || {})[b] || {}) };
-      for (const k of toRemove) delete nextBusMap[k];
+      const currentBusMap = (s.perf.knobMapByBusId || {})[b] || {};
+      const nextBusMap = {};
+
+      for (const [knobId, rawTargets] of Object.entries(currentBusMap)) {
+        const targets = Array.isArray(rawTargets) ? rawTargets : rawTargets ? [rawTargets] : [];
+        const kept = [];
+
+        for (const t of targets) {
+          if (String(t?.fxGuid || "") === fx && Number(t?.paramIdx) === idx) {
+            removed.push({ knobId, target: t });
+          } else {
+            kept.push(t);
+          }
+        }
+
+        if (kept.length > 0) {
+          nextBusMap[knobId] = kept;
+        }
+      }
 
       return {
         perf: {
@@ -1169,6 +1342,15 @@ export const useRfxStore = create((set, get) => ({
         },
       };
     });
+
+    if (removed.length) {
+      get().logEvent("knobmap:param_unmapped", {
+        busId: b,
+        fxGuid: fx,
+        paramIdx: idx,
+        removed,
+      });
+    }
   },
 
   unmapFxFromAllBuses: ({ fxGuid }) => {
@@ -1177,24 +1359,32 @@ export const useRfxStore = create((set, get) => ({
 
     const knobMapByBusId = get().perf?.knobMapByBusId || {};
     const nextKnobMapByBusId = {};
-    let removed = [];
+    const removed = [];
 
     for (const [busId, busMap] of Object.entries(knobMapByBusId)) {
       const nextBusMap = {};
 
-      for (const [knobId, target] of Object.entries(busMap || {})) {
-        if (String(target?.fxGuid || "") === fx) {
-          removed.push({
-            busId,
-            knobId,
-            fxGuid: fx,
-            paramIdx: Number(target?.paramIdx),
-            trackGuid: String(target?.trackGuid || ""),
-          });
-          continue;
+      for (const [knobId, rawTargets] of Object.entries(busMap || {})) {
+        const targets = Array.isArray(rawTargets) ? rawTargets : rawTargets ? [rawTargets] : [];
+        const kept = [];
+
+        for (const target of targets) {
+          if (String(target?.fxGuid || "") === fx) {
+            removed.push({
+              busId,
+              knobId,
+              fxGuid: fx,
+              paramIdx: Number(target?.paramIdx),
+              trackGuid: String(target?.trackGuid || ""),
+            });
+          } else {
+            kept.push(target);
+          }
         }
 
-        nextBusMap[knobId] = target;
+        if (kept.length > 0) {
+          nextBusMap[knobId] = kept;
+        }
       }
 
       nextKnobMapByBusId[busId] = nextBusMap;
@@ -1215,9 +1405,6 @@ export const useRfxStore = create((set, get) => ({
     }));
   },
 
-  // ------------------------------------------------------------
-  // Session helpers
-  // ------------------------------------------------------------
   setActiveTrackGuid: (trackGuid) =>
     set((s) => ({ session: { ...s.session, activeTrackGuid: trackGuid } })),
 
