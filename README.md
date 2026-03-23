@@ -4,6 +4,9 @@ Real-time audio routing and control interface built with **React**, **Electron**
 
 The system provides a graphical control surface for routing audio, controlling plugin parameters, and mapping hardware or macro controls to DSP parameters.
 
+![RFX UI Demo](./public/rfx-touch-ui-demo.mp4)
+*Brief demo video of touchscreen UI function*
+
 ![RFX Perform View](./public/rfx-perform-view.png)
 *Perform view showing real-time bus controls and macro knobs.*
 
