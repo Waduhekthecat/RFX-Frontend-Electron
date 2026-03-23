@@ -8,7 +8,10 @@ The system provides a graphical control surface for routing audio, controlling p
 
 [![RFX Touch UI Demo](./public/rfx-touch-ui-demo.gif)](https://youtu.be/xmCoToTY9f8)
 
-▶️ **Watch full demo video on YouTube**
+▶️ **[Click here to watch the demo video](https://youtu.be/xmCoToTY9f8)**
+
+![RFX Perform View](./public/rfx-perform-view.png)
+*Perform view showing real-time bus controls and macro knobs.*
 
 ![RFX Perform View](./public/rfx-perform-view.png)
 *Perform view showing real-time bus controls and macro knobs.*
