@@ -10,14 +10,15 @@ The system provides a graphical control surface for routing audio, controlling p
 
 ▶️ **[Click here to watch the demo video](https://youtu.be/xmCoToTY9f8)**
 
-![RFX Perform View](./public/rfx-perform-view.png)
-*Perform view showing real-time bus controls and macro knobs.*
+---
 
-![RFX Perform View](./public/rfx-perform-view.png)
-*Perform view showing real-time bus controls and macro knobs.*
+## RFX UI Screenshots
 
 ![RFX Edit View](./public/rfx-edit-view.png)
 *Edit view used for managing plugin chains and parameter controls.*
+
+![RFX Perform View](./public/rfx-perform-view.png)
+*Perform view showing real-time bus controls and macro knobs.*
 
 ---
 
