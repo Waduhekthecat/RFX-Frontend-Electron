@@ -1,5 +1,3 @@
-// src/core/rfx/Normalize.js
-
 function asStr(x, fallback = "") {
   const s = x == null ? "" : String(x);
   return s || fallback;
@@ -394,11 +392,4 @@ function normalizeEdge(id, ownerGuid, category, e) {
     srcChan: asNum(e?.srcChan, 0),
     dstChan: asNum(e?.dstChan, 0),
   };
-}
-
-function normalizeMode(m) {
-  const x = String(m || "linear").toLowerCase();
-  if (x === "lcr") return "lcr";
-  if (x === "parallel") return "parallel";
-  return "linear";
 }

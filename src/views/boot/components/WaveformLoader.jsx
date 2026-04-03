@@ -1,4 +1,5 @@
 import React from "react";
+import { clamp01 } from "../../../core/DomainHelpers";
 
 export function WaveformLoader({ progress01 = 0, height = 44 }) {
   const ref = React.useRef(null);
@@ -155,13 +156,6 @@ export function WaveformLoader({ progress01 = 0, height = 44 }) {
   return <canvas ref={ref} />;
 }
 
-function clamp01(n) {
-  const v = Number(n);
-  if (!Number.isFinite(v)) return 0;
-  if (v < 0) return 0;
-  if (v > 1) return 1;
-  return v;
-}
 
 // ✅ Updated: clamps radius to prevent canvas warnings
 function roundRect(ctx, x, y, w, h, r) {

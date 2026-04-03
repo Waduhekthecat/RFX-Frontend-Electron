@@ -1,5 +1,5 @@
-// src/views/edit/plugin/PluginView.jsx
 import React from "react";
+import { clamp01, canonicalTrackGuid } from "../../../core/DomainHelpers";
 import { useParams, useNavigate } from "react-router-dom";
 import { Panel } from "../../../components/ui/Panel";
 import { styles, KNOB_STRIP_H } from "./_styles";
@@ -11,16 +11,6 @@ import { KnobRow } from "../../../components/controls/knobs/KnobRow";
 const EMPTY = Object.freeze({});
 const EMPTY_ARR = Object.freeze([]);
 const EMPTY_OBJ = Object.freeze({});
-
-function clamp01(n) {
-  const v = Number(n);
-  if (!Number.isFinite(v)) return 0;
-  return Math.max(0, Math.min(1, v));
-}
-
-function canonicalTrackGuid(id) {
-  return String(id || "").replace(/^([A-Za-z]+_\d+)_([ABC])$/, "$1$2");
-}
 
 function readFxParam01(sources, fxGuid, paramIdx, fallback01 = 0.5) {
   const overlayByGuid = sources?.overlayByGuid || EMPTY_OBJ;

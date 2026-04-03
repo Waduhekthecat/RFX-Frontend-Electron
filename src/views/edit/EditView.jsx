@@ -1,7 +1,7 @@
-// src/views/edit/EditView.jsx
 import React from "react";
 import { useNavigate, Outlet, useLocation } from "react-router-dom";
-import { useTransport } from "../../core/transport/TransportProvider";
+import { useTransportVM } from "../../core/useTransportVM";
+import { normalizeMode, availableLanes, nextValidLane, canonicalTrackGuid } from "../../core/DomainHelpers";
 import { useRfxStore } from "../../core/rfx/Store";
 import { uid } from "../../core/rfx/Util";
 import { useIntent } from "../../core/useIntent";
@@ -9,55 +9,6 @@ import { Panel, Inset } from "../../components/ui/Panel";
 import { Badge } from "../../components/ui/Badge";
 import { InstalledFxShell } from "./components/InstalledFxShell";
 import { BusMixControls, TrackMixControls } from "./components/mixControls/_index";
-
-// ---------------------------
-// VM hook (transport snapshot)
-// ---------------------------
-function useVM() {
-  const t = useTransport();
-  const [vm, setVm] = React.useState(() => t.getSnapshot());
-  React.useEffect(() => t.subscribe(setVm), [t]);
-  return vm;
-}
-
-// ---------------------------
-// Canonical IDs
-// ---------------------------
-function canonicalTrackGuid(id) {
-  return String(id || "").replace(/^([A-Za-z]+_\d+)_([ABC])$/, "$1$2");
-}
-
-// ---------------------------
-// Routing helpers
-// ---------------------------
-function normalizeMode(m) {
-  const x = String(m || "linear").toLowerCase();
-  if (x === "lcr") return "lcr";
-  if (x === "parallel") return "parallel";
-  return "linear";
-}
-
-function lanesForMode(mode) {
-  const m = normalizeMode(mode);
-  if (m === "lcr") return { A: true, B: true, C: true };
-  if (m === "parallel") return { A: true, B: true, C: false };
-  return { A: true, B: false, C: false };
-}
-
-function availableLanes(mode) {
-  const on = lanesForMode(mode);
-  const out = [];
-  if (on.A) out.push("A");
-  if (on.B) out.push("B");
-  if (on.C) out.push("C");
-  return out;
-}
-
-function nextValidLane(mode, preferred) {
-  const lanes = availableLanes(mode);
-  if (preferred && lanes.includes(preferred)) return preferred;
-  return lanes[0] || "A";
-}
 
 // ---------------------------
 // UI bits
@@ -434,7 +385,7 @@ export function EditView() {
   const inPluginSubView = location.pathname.startsWith("/edit/plugin/");
   if (inPluginSubView) return <Outlet />;
 
-  const vm = useVM();
+  const vm = useTransportVM();
   const intent = useIntent();
 
   const activeBusId = vm?.activeBusId || vm?.buses?.[0]?.id || "FX_1";

@@ -1,7 +1,7 @@
-// src/app/nav/Nav.jsx
 import React from "react";
 import { NavLink } from "react-router-dom";
-import { useTransport } from "../../core/transport/TransportProvider";
+import { useTransportVM } from "../../core/useTransportVM";
+import { normalizeMode } from "../../core/DomainHelpers";
 import { styles, cx } from "./_styles";
 
 const BASE_TABS = [
@@ -11,19 +11,6 @@ const BASE_TABS = [
   { label: "System", to: "/system" },
 ];
 
-function useVM() {
-  const t = useTransport();
-  const [vm, setVm] = React.useState(() => t.getSnapshot());
-  React.useEffect(() => t.subscribe(setVm), [t]);
-  return vm;
-}
-
-function normalizeMode(m) {
-  const x = String(m || "linear").toLowerCase();
-  if (x === "lcr") return "lcr";
-  if (x === "parallel") return "parallel";
-  return "linear";
-}
 
 function ModeBadge({ mode }) {
   const m = normalizeMode(mode);
@@ -61,7 +48,7 @@ function StatusDot({ label, active }) {
 }
 
 export function Nav() {
-  const vm = useVM();
+  const vm = useTransportVM();
 
   const tabs = React.useMemo(() => {
     const devTab = import.meta.env.DEV

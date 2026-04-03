@@ -1,16 +1,10 @@
+import { clamp01 } from "../DomainHelpers";
 const EPSILON = 0.001;
 
 function nowMs() {
   return Date.now();
 }
 
-function clamp01(n) {
-  const v = Number(n);
-  if (!Number.isFinite(v)) return 0;
-  if (v < 0) return 0;
-  if (v > 1) return 1;
-  return v;
-}
 
 function ensureSlice(slice) {
   if (slice && typeof slice === "object" && slice.byKey && typeof slice.byKey === "object") {

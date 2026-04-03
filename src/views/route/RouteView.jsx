@@ -1,5 +1,6 @@
 import React, { useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useTransport } from "../../core/transport/TransportProvider";
+import { useTransportVM } from "../../core/useTransportVM";
+import { normalizeMode, availableLanes } from "../../core/DomainHelpers";
 
 import { Card, MiniLabel, NodePill } from "./components/_index";
 import { styles } from "./_styles";
@@ -12,16 +13,6 @@ import {
   toLocal,
 } from "./_geom";
 
-// ----------------------------
-// VM
-// ----------------------------
-function useVM() {
-  const t = useTransport();
-  const [vm, setVm] = React.useState(() => t.getSnapshot());
-  React.useEffect(() => t.subscribe(setVm), [t]);
-  return vm;
-}
-
 function asArray(x) {
   return Array.isArray(x) ? x : [];
 }
@@ -29,18 +20,7 @@ function norm(s) {
   return String(s ?? "").trim();
 }
 
-function normalizeMode(m) {
-  const x = String(m || "linear").toLowerCase();
-  if (x === "parallel") return "parallel";
-  if (x === "lcr") return "lcr";
-  return "linear";
-}
-function lanesForMode(mode) {
-  const m = normalizeMode(mode);
-  if (m === "parallel") return ["A", "B"];
-  if (m === "lcr") return ["A", "B", "C"];
-  return ["A"];
-}
+// availableLanes(mode) imported from DomainHelpers — returns same ["A"], ["A","B"], or ["A","B","C"]
 
 function extractBuses(vm) {
   const buses =
@@ -92,7 +72,7 @@ function isLaneArmed(vm, busId, laneLetter) {
 // RouteView
 // ----------------------------
 export function RouteView() {
-  const vm = useVM();
+  const vm = useTransportVM();
 
   const buses = useMemo(() => extractBuses(vm), [vm]);
   const activeBusId = norm(vm?.activeBusId || "");
@@ -102,7 +82,7 @@ export function RouteView() {
     return buses.slice(0, 4).map((b, i) => {
       const id = busIdOf(b, i);
       const mode = normalizeMode(busModes?.[id] || b?.mode || "linear");
-      const enabledLetters = lanesForMode(mode);
+      const enabledLetters = availableLanes(mode);
       return { id, mode, enabledLetters };
     });
   }, [buses, busModes]);

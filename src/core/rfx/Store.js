@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { clamp01, canonicalTrackGuid, normBusId, makeGestureId } from "../DomainHelpers";
 import { normalize } from "./Normalize";
 import { buildOptimistic } from "./Optimistic";
 import { reconcilePending } from "./Reconcile";
@@ -116,13 +117,6 @@ function coerceMetersFrame(frame) {
   };
 }
 
-function clamp01(n) {
-  const v = Number(n);
-  if (!Number.isFinite(v)) return 0;
-  if (v < 0) return 0;
-  if (v > 1) return 1;
-  return v;
-}
 
 function normalizeRange01(min01, max01, fallbackMin = 0, fallbackMax = 1) {
   const a = clamp01(min01 ?? fallbackMin);

@@ -1,27 +1,14 @@
-// src/views/perform/PerformView.jsx
 import React from "react";
 import { useIntent } from "../../core/useIntent";
 import { useRfxStore } from "../../core/rfx/Store";
 import { KnobRow } from "../../components/controls/knobs/KnobRow";
 import { Panel } from "../../components/ui/Panel";
 import { BusCardArea } from "./components/_index";
+import { normalizeMode, clamp01 } from "../../core/DomainHelpers";
 import { styles, KNOB_STRIP_H } from "./_styles";
 
 const EMPTY_ARR = Object.freeze([]);
 const EMPTY_OBJ = Object.freeze({});
-
-function normalizeMode(m) {
-  const x = String(m || "linear").toLowerCase();
-  if (x === "lcr") return "lcr";
-  if (x === "parallel") return "parallel";
-  return "linear";
-}
-
-function clamp01(n) {
-  const v = Number(n);
-  if (!Number.isFinite(v)) return 0;
-  return Math.max(0, Math.min(1, v));
-}
 
 function readFxParam01(sources, fxGuid, paramIdx, fallback01 = 0.5) {
   const f = clamp01(fallback01);

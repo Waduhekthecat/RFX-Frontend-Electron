@@ -1,13 +1,8 @@
 import React from "react";
+import { clamp01 } from "../../../core/DomainHelpers";
 import { Knob } from "./Knob";
 import { styles } from "./_styles";
 import { useRfxStore } from "../../../core/rfx/Store";
-
-function clamp01(n) {
-  const v = Number(n);
-  if (!Number.isFinite(v)) return 0;
-  return Math.max(0, Math.min(1, v));
-}
 
 export function KnobRow({ knobs, busId, mappingArmed }) {
   const dispatchIntent = useRfxStore((s) => s.dispatchIntent);

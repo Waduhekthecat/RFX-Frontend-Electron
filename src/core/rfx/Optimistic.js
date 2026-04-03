@@ -1,4 +1,5 @@
-// src/core/rfx/Optimistic.js
+import { normalizeMode, canonicalTrackGuid, normBusId, findLaneGuidsForBus } from "../DomainHelpers";
+
 /**
  * Optimistic overlay builder.
  * Accepts either { kind: "X" } OR { name: "X" }.
@@ -157,7 +158,7 @@ export function buildOptimistic(state, intent) {
       const { busId, mode } = intent || {};
       if (!busId) return null;
 
-      const lanes = findLaneGuidsForBus(state, busId);
+      const lanes = findLaneGuidsForBus(state?.entities?.tracksByGuid || {}, busId);
       if (!lanes.A && !lanes.B && !lanes.C) return null;
 
       const want = normalizeMode(mode);
@@ -195,34 +196,4 @@ export function buildOptimistic(state, intent) {
     default:
       return null;
   }
-}
-
-function canonicalTrackGuid(id) {
-  return String(id || "").replace(/^([A-Za-z]+_\d+)_([ABC])$/, "$1$2");
-}
-
-function normalizeMode(m) {
-  const x = String(m || "linear").toLowerCase();
-  if (x === "lcr") return "lcr";
-  if (x === "parallel") return "parallel";
-  return "linear";
-}
-
-function findLaneGuidsForBus(state, busId) {
-  const tracksByGuid = state?.entities?.tracksByGuid || {};
-  const wantA = `${busId}A`;
-  const wantB = `${busId}B`;
-  const wantC = `${busId}C`;
-
-  const out = { A: null, B: null, C: null };
-
-  for (const guid of Object.keys(tracksByGuid)) {
-    const tr = tracksByGuid[guid];
-    const name = String(tr?.name || "");
-    if (name === wantA) out.A = guid;
-    else if (name === wantB) out.B = guid;
-    else if (name === wantC) out.C = guid;
-  }
-
-  return out;
 }

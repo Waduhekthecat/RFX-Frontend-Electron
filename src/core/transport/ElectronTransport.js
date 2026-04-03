@@ -1,13 +1,6 @@
+import { clamp01 } from "../DomainHelpers";
 function isAvailable() {
   return typeof window !== "undefined" && !!window.rfx?.transport;
-}
-
-function clamp01(n) {
-  const v = Number(n);
-  if (!Number.isFinite(v)) return 0;
-  if (v < 0) return 0;
-  if (v > 1) return 1;
-  return v;
 }
 
 function getTrackNumberFromRfxGuid(trackGuid) {

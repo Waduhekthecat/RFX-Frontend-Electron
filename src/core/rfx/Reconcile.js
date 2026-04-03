@@ -1,5 +1,4 @@
-// src/core/rfx/Reconcile.js
-
+import { normalizeMode, canonicalTrackGuid, normBusId, findLaneGuidsForBus, nearlyEqual } from "../DomainHelpers";
 import { settleContinuousOverlays } from "./Continuous";
 
 const OP_TIMEOUT_MS = 8000;
@@ -64,22 +63,6 @@ function getVerifyEps(kind) {
   }
 }
 
-function canonicalTrackGuid(id) {
-  const s = String(id || "");
-  // FX_1_A -> FX_1A (also FX_12_B -> FX_12B)
-  return s.replace(/^([A-Za-z]+_\d+)_([ABC])$/, "$1$2");
-}
-
-function normBusId(id) {
-  const s = String(id || "").trim().toUpperCase();
-  if (!s) return "";
-  if (s === "INPUT") return "INPUT";
-
-  const m = s.match(/^FX_(\d+)([ABC])?$/);
-  if (!m) return s;
-
-  return `FX_${m[1]}`;
-}
 
 function panSignedTo01(v) {
   const n = Number(v);
@@ -538,7 +521,7 @@ function opVerifySnapshot(op, norm) {
           : v(false, REASONS.BUS_MODE_MISMATCH(want, got));
       }
 
-      const lanes = findLaneGuidsForBusByName(tracksByGuid, busId);
+      const lanes = findLaneGuidsForBus(tracksByGuid, busId);
 
       const wantA = want === "linear" || want === "parallel" || want === "lcr";
       const wantB = want === "parallel" || want === "lcr";
@@ -692,7 +675,7 @@ function resolveContinuousTruthValue01(key, norm) {
 }
 
 function armedLaneGuidsForBus(tracksByGuid, busId) {
-  const lanes = findLaneGuidsForBusByName(tracksByGuid, busId);
+  const lanes = findLaneGuidsForBus(tracksByGuid, busId);
   const out = [];
   if (lanes.A && tracksByGuid[lanes.A]?.recArm) out.push(lanes.A);
   if (lanes.B && tracksByGuid[lanes.B]?.recArm) out.push(lanes.B);
@@ -852,10 +835,6 @@ function clearOverlayForOp(overlay, op) {
   return next;
 }
 
-function nearlyEqual(a, b, eps) {
-  if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
-  return Math.abs(a - b) <= eps;
-}
 
 function arrayEqual(a, b) {
   if (a === b) return true;
@@ -865,12 +844,6 @@ function arrayEqual(a, b) {
   return true;
 }
 
-function normalizeMode(m) {
-  const x = String(m || "linear").toLowerCase();
-  if (x === "lcr") return "lcr";
-  if (x === "parallel") return "parallel";
-  return "linear";
-}
 
 function mustFindInputTrackGuidByName(tracksByGuid) {
   for (const guid of Object.keys(tracksByGuid || {})) {
@@ -878,24 +851,6 @@ function mustFindInputTrackGuidByName(tracksByGuid) {
     if (String(tr?.name || "") === "INPUT") return guid;
   }
   throw new Error(REASONS.MISSING_INPUT);
-}
-
-function findLaneGuidsForBusByName(tracksByGuid, busId) {
-  const wantA = `${busId}A`;
-  const wantB = `${busId}B`;
-  const wantC = `${busId}C`;
-
-  const out = { A: null, B: null, C: null };
-
-  for (const guid of Object.keys(tracksByGuid || {})) {
-    const tr = tracksByGuid[guid];
-    const name = String(tr?.name || "");
-    if (name === wantA) out.A = guid;
-    else if (name === wantB) out.B = guid;
-    else if (name === wantC) out.C = guid;
-  }
-
-  return out;
 }
 
 function setEqual(aList, bList) {

@@ -1,4 +1,5 @@
 import React from "react";
+import { clamp01, makeGestureId } from "../../../../core/DomainHelpers";
 import { useRfxStore } from "../../../../core/rfx/Store";
 import { Slider } from "../../../../components/controls/sliders/_index";
 import {
@@ -6,16 +7,6 @@ import {
   useScrubValue,
   useDoubleTap,
 } from "../../../../components/ui/gestures/_index";
-
-function clamp01(n) {
-  const v = Number(n);
-  if (!Number.isFinite(v)) return 0;
-  return Math.max(0, Math.min(1, v));
-}
-
-function makeGestureId(prefix = "g") {
-  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-}
 
 const PARAM_SENSITIVITY = 0.0026;
 const SMOOTH_ALPHA = 0.38;

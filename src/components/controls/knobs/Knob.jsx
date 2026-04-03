@@ -1,12 +1,7 @@
 import React from "react";
+import { clamp01 } from "../../../core/DomainHelpers";
 import knobStripUrl from "../../../assets/knobSpriteStrip.png";
 import { styles, SPRITE_FRAMES, RENDER_SIZE, CENTER_FRAME } from "./_styles";
-
-function clamp01(n) {
-  const v = Number(n);
-  if (!Number.isFinite(v)) return 0;
-  return Math.max(0, Math.min(1, v));
-}
 
 function valueToFrame(v01, frames) {
   const v = clamp01(v01);
