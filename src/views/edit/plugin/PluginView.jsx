@@ -12,6 +12,16 @@ const EMPTY = Object.freeze({});
 const EMPTY_ARR = Object.freeze([]);
 const EMPTY_OBJ = Object.freeze({});
 
+function normalizeKnobTargets(raw) {
+  if (!raw) return EMPTY_ARR;
+  return Array.isArray(raw) ? raw : [raw];
+}
+
+function getPrimaryKnobTarget(raw) {
+  const targets = normalizeKnobTargets(raw);
+  return targets[0] || null;
+}
+
 function readFxParam01(sources, fxGuid, paramIdx, fallback01 = 0.5) {
   const overlayByGuid = sources?.overlayByGuid || EMPTY_OBJ;
   const snapshotByGuid = sources?.snapshotByGuid || EMPTY_OBJ;
@@ -99,18 +109,27 @@ export function PluginView() {
     const maps = knobMapByBusId?.[busId] || EMPTY_OBJ;
     const out = {};
 
-    for (const [knobId, t] of Object.entries(maps)) {
-      if (!t) continue;
-      if (String(t.fxGuid) !== String(fxGuid)) continue;
+    // for (const [knobId, t] of Object.entries(maps)) {
+    //   if (!t) continue;
+    //   if (String(t.fxGuid) !== String(fxGuid)) continue;
 
-      const idx = Number(t.paramIdx);
-      if (!Number.isFinite(idx)) continue;
+    //   const idx = Number(t.paramIdx);
+    //   if (!Number.isFinite(idx)) continue;
+    for (const [knobId, rawTarget] of Object.entries(maps)) {
+      const targets = normalizeKnobTargets(rawTarget);
+      if (!targets.length) continue;
 
       const m = String(knobId).match(/_k(\d+)$/);
       const n = m ? Number(m[1]) : null;
       const label = n ? `K${n}` : knobId;
 
-      (out[idx] ||= []).push(label);
+      // (out[idx] ||= []).push(label);
+      for (const t of targets) {
+        if (String(t?.fxGuid) !== String(fxGuid)) continue;
+        const idx = Number(t?.paramIdx);
+        if (!Number.isFinite(idx)) continue;
+        (out[idx] ||= []).push(label);
+      }
     }
 
     for (const k of Object.keys(out)) out[k].sort();
@@ -192,7 +211,8 @@ export function PluginView() {
 
     return Array.from({ length: 7 }).map((_, i) => {
       const knobId = `${busId}_k${i + 1}`;
-      const target = maps[knobId] || null;
+      // const target = maps[knobId] || null;
+      const target = getPrimaryKnobTarget(maps[knobId]);
 
       const base01 = Number.isFinite(values[knobId]) ? values[knobId] : 0.5;
 
@@ -329,7 +349,8 @@ export function PluginView() {
 
                   const knobs = Array.from({ length: 7 }).map((_, i) => {
                     const knobId = `${busId}_k${i + 1}`;
-                    const target = maps[knobId] || null;
+                    // const target = maps[knobId] || null;
+                    const target = getPrimaryKnobTarget(maps[knobId]);
                     const mappedText = target
                       ? `${target.fxName || "FX"} • ${target.paramName || `#${target.paramIdx}`}`
                       : "Unmapped";

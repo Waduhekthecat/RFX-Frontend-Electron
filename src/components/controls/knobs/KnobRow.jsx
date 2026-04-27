@@ -14,6 +14,14 @@ export function KnobRow({ knobs, busId, mappingArmed }) {
   const mapForBus = knobMapByBusId?.[busKey] || {};
 
   const visibleKnobs = React.useMemo(() => (knobs || []).slice(0, 7), [knobs]);
+  const getTargetsForKnob = React.useCallback(
+    (knobId) => {
+      const raw = mapForBus?.[knobId];
+      if (!raw) return [];
+      return Array.isArray(raw) ? raw : [raw];
+    },
+    [mapForBus]
+  );
 
   const [localValues, setLocalValues] = React.useState(() => ({}));
   const localValuesRef = React.useRef({});
@@ -67,8 +75,11 @@ export function KnobRow({ knobs, busId, mappingArmed }) {
       // persist the knob's own value immediately
       setKnobValueLocal({ busId: busKey, knobId, value01: v01 });
 
-      const target = mapForBus?.[knobId];
-      if (target?.fxGuid && Number.isFinite(Number(target?.paramIdx))) {
+      // const target = mapForBus?.[knobId];
+      // if (target?.fxGuid && Number.isFinite(Number(target?.paramIdx))) {
+      const targets = getTargetsForKnob(knobId);
+      for (const target of targets) {
+        if (!target?.fxGuid || !Number.isFinite(Number(target?.paramIdx))) continue;
         dispatchIntent({
           name: "setParamValue",
           phase: "preview",
@@ -80,17 +91,21 @@ export function KnobRow({ knobs, busId, mappingArmed }) {
         });
       }
     },
-    [busKey, dispatchIntent, mapForBus, setKnobValueLocal]
+    // [busKey, dispatchIntent, mapForBus, setKnobValueLocal]
+    [busKey, dispatchIntent, getTargetsForKnob, setKnobValueLocal]
   );
 
   const onKnobCommit = React.useCallback(
     (knobId) => {
       activeLocalKnobsRef.current.delete(knobId);
 
-      const target = mapForBus?.[knobId];
-      if (target?.fxGuid && Number.isFinite(Number(target?.paramIdx))) {
-        const latestValue = clamp01(localValuesRef.current?.[knobId]);
-
+      // const target = mapForBus?.[knobId];
+      // if (target?.fxGuid && Number.isFinite(Number(target?.paramIdx))) {
+      //   const latestValue = clamp01(localValuesRef.current?.[knobId]);
+      const latestValue = clamp01(localValuesRef.current?.[knobId]);
+      const targets = getTargetsForKnob(knobId);
+      for (const target of targets) {
+        if (!target?.fxGuid || !Number.isFinite(Number(target?.paramIdx))) continue;
         dispatchIntent({
           name: "setParamValue",
           phase: "commit",
@@ -102,7 +117,8 @@ export function KnobRow({ knobs, busId, mappingArmed }) {
         });
       }
     },
-    [busKey, dispatchIntent, mapForBus]
+    // [busKey, dispatchIntent, mapForBus]
+    [busKey, dispatchIntent, getTargetsForKnob]
   );
 
   const onKnobTap = React.useCallback(

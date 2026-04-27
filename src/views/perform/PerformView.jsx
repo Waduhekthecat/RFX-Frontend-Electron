@@ -10,6 +10,11 @@ import { styles, KNOB_STRIP_H } from "./_styles";
 const EMPTY_ARR = Object.freeze([]);
 const EMPTY_OBJ = Object.freeze({});
 
+function getPrimaryKnobTarget(raw) {
+  if (!raw) return null;
+  return Array.isArray(raw) ? raw[0] || null : raw;
+}
+
 function readFxParam01(sources, fxGuid, paramIdx, fallback01 = 0.5) {
   const f = clamp01(fallback01);
 
@@ -78,7 +83,8 @@ export function PerformView() {
 
     return Array.from({ length: 7 }).map((_, i) => {
       const knobId = `${busId}_k${i + 1}`;
-      const target = maps[knobId] || null;
+      // const target = maps[knobId] || null;
+      const target = getPrimaryKnobTarget(maps[knobId]);
 
       const mappedLabel = target
         ? `${target.fxName || "FX"} • ${target.paramName || `#${target.paramIdx}`}`
