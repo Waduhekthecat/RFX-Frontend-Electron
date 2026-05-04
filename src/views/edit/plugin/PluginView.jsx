@@ -7,7 +7,7 @@ import { useIntent } from "../../../core/useIntent";
 import { useRfxStore } from "../../../core/rfx/Store";
 import { ParamCard } from "./components/ParamCard";
 import { KnobRow } from "../../../components/controls/knobs/KnobRow";
-import { MapCard } from "../../../components/ui/MapCard";
+// import { MapCard } from "../../../components/ui/MapCard";
 
 const EMPTY = Object.freeze({});
 const EMPTY_ARR = Object.freeze([]);
@@ -107,6 +107,14 @@ export function PluginView() {
   const [dragMappingParam, setDragMappingParam] = React.useState(null);
   const [knobRowExpanded, setKnobRowExpanded] = React.useState(false);
 
+  const handleToggleExpand = () => {
+    setKnobRowExpanded((prev) => {
+      const next = !prev;
+      console.log("knobRowExpanded:", next);
+      return next;
+    });
+  };
+
   const onMapDragStart = React.useCallback((p) => {
     if (!p) return;
     const idx = Number(p.idx);
@@ -151,7 +159,6 @@ export function PluginView() {
     },
     [activeBusId, dragMappingParam, fxGuid, params, commitKnobMapping, trackGuid, pluginName]
   );
-
 
   const mappedKnobsByParamIdx = React.useMemo(() => {
     const busId = String(activeBusId || "");
@@ -309,40 +316,46 @@ export function PluginView() {
   );
 
   const bottomKnobs = React.useMemo(() => {
-    const busId = bottomBusId;
-    const values = knobValuesByBusId?.[busId] || EMPTY_OBJ;
-    const maps = knobMapByBusId?.[busId] || EMPTY_OBJ;
+  const busId = bottomBusId;
+  const values = knobValuesByBusId?.[busId] || EMPTY_OBJ;
+  const maps = knobMapByBusId?.[busId] || EMPTY_OBJ;
 
-    return Array.from({ length: 7 }).map((_, i) => {
-      const knobId = `${busId}_k${i + 1}`;
-      // const target = maps[knobId] || null;
-      const target = getPrimaryKnobTarget(maps[knobId]);
+  return Array.from({ length: 7 }).map((_, i) => {
+    const knobId = `${busId}_k${i + 1}`;
+    const target = getPrimaryKnobTarget(maps[knobId]);
 
-      const base01 = Number.isFinite(values[knobId]) ? values[knobId] : 0.5;
+    const base01 = Number.isFinite(values[knobId]) ? values[knobId] : 0.5;
 
-      const display01 =
-        target?.fxGuid && Number.isFinite(Number(target?.paramIdx))
-          ? readFxParam01(
-              fxParamSources,
-              String(target.fxGuid),
-              Number(target.paramIdx),
-              base01
-            )
-          : clamp01(base01);
+    const param01 =
+      target?.fxGuid && Number.isFinite(Number(target?.paramIdx))
+        ? readFxParam01(
+            fxParamSources,
+            String(target.fxGuid),
+            Number(target.paramIdx),
+            base01
+          )
+        : null;
 
-      const mappedLabel = target
-        ? `${target.fxName || "FX"} • ${target.paramName || `#${target.paramIdx}`}`
-        : "";
+    const display01 =
+      param01 !== null
+        ? target?.invert === true
+          ? clamp01(1 - param01)
+          : clamp01(param01)
+        : clamp01(base01);
 
-      return {
-        id: knobId,
-        label: target?.paramName ? String(target.paramName) : `K${i + 1}`,
-        value: display01,
-        mapped: !!target,
-        mappedLabel,
-      };
-    });
-  }, [bottomBusId, knobValuesByBusId, knobMapByBusId, fxParamSources]);
+    const mappedLabel = target
+      ? `${target.fxName || "FX"} • ${target.paramName || `#${target.paramIdx}`}`
+      : "";
+
+    return {
+      id: knobId,
+      label: target?.paramName ? String(target.paramName) : `K${i + 1}`,
+      value: display01,
+      mapped: !!target,
+      mappedLabel,
+    };
+  });
+}, [bottomBusId, knobValuesByBusId, knobMapByBusId, fxParamSources]);
 
   return (
     <div className={styles.Root}>
@@ -388,186 +401,29 @@ export function PluginView() {
           )}
         </div>
 
-        <Panel
+        <div
           className={styles.KnobPanel}
           style={{
             position: "absolute",
             left: 0,
             right: 0,
             bottom: 0,
-            zIndex: knobRowExpanded ? 30 : 10,
             top: knobRowExpanded ? 0 : "auto",
-            height: knobRowExpanded ? "calc(100% - 74px)" : KNOB_STRIP_H,
-            transition: "height 0.4s ease, top 0.4s ease",
+            zIndex: knobRowExpanded ? 999 : 10,
+            height: knobRowExpanded ? "auto" : KNOB_STRIP_H,
             overflow: "hidden",
-            display: "flex",
-            flexDirection: "column",
           }}
         >
           <KnobRow
             knobs={bottomKnobs}
             busId={bottomBusId}
+            knobMapByBusId={knobMapByBusId}
             mappingArmed={mappingArmed}
             onDropMap={onDropMapToKnob}
             mapDragActive={!!dragMappingParam}
-            onToggleExpand={() => setKnobRowExpanded((prev) => !prev)}
-            expanded={knobRowExpanded}
+            onExpandedChange={setKnobRowExpanded}
           />
-
-          {knobRowExpanded ? (
-            <div className="px-3 pb-3 overflow-auto flex-1 min-h-0">
-              <div className="h-px bg-white/10 mb-3" />
-              <div className="flex flex-col gap-3">
-                {mappedParamsForExpandedView.map((entry) => (
-                  <MapCard
-                    key={`${entry.trackGuid || ""}|${entry.fxGuid}|${entry.paramIdx}`}
-                    paramName={entry.paramName}
-                    pluginName={entry.pluginName}
-                    value01={readFxParam01(fxParamSources, entry.fxGuid, entry.paramIdx, 0.5)}
-                    onChange01={(next) => onMappedParamChange(entry, next)}
-                  />
-                ))}
-
-                {!mappedParamsForExpandedView.length ? (
-                  <div className="text-[12px] text-white/45">No mapped parameters on this bus.</div>
-                ) : null}
-              </div>
-            </div>
-          ) : null}
-        </Panel>
-
-        {mapModalOpen ? (
-          <div className="fixed inset-0 z-[1000] flex items-center justify-center px-[30px]">
-            <div
-              className="absolute inset-0 bg-black/60"
-              onClick={() => {
-                setMapModalOpen(false);
-                setMapParam(null);
-              }}
-            />
-
-            <div
-              className="relative w-full rounded-2xl border border-white/10 bg-[#0b0f14] shadow-2xl"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="p-6 flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <div className="text-[20px] font-semibold text-white">
-                    Map parameter to knob
-                  </div>
-                  <div className="text-[15px] text-white/45 truncate">
-                    {pluginName}
-                    {" • "}
-                    {String(
-                      mapParam?.uiLabel ||
-                        mapParam?.name ||
-                        `Param ${modalHasIdx ? modalParamIdx : ""}`
-                    )}
-                    {" • "}
-                    Bus: {String(activeBusId || "NONE")}
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setMapInverse((prev) => !prev)}
-                  className={
-                    mapInverse
-                      ? "h-11 px-5 rounded-xl border border-cyan-300/60 bg-cyan-400/20 hover:bg-cyan-400/30 text-[14px] font-semibold text-cyan-100"
-                      : "h-11 px-5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-[14px] font-semibold text-white/80"
-                  }
-                >
-                  {mapInverse ? "INVERSE" : "LINEAR"}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMapModalOpen(false);
-                    setMapParam(null);
-                    setMapInverse(false);
-                  }}
-                  className="h-11 px-5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-[14px] font-semibold text-white/80"
-                >
-                  CLOSE
-                </button>
-              </div>
-
-              <div className="h-px bg-white/10" />
-
-              <div className="p-6">
-                {(() => {
-                  const busId = modalBusId;
-                  const idx = modalParamIdx;
-
-                  if (!busId || !Number.isFinite(idx)) {
-                    return (
-                      <div className="text-[12px] text-white/45">
-                        Missing busId or param index.
-                      </div>
-                    );
-                  }
-
-                  const maps = knobMapByBusId?.[busId] || EMPTY_OBJ;
-
-                  const knobs = Array.from({ length: 7 }).map((_, i) => {
-                    const knobId = `${busId}_k${i + 1}`;
-                    // const target = maps[knobId] || null;
-                    const target = getPrimaryKnobTarget(maps[knobId]);
-                    const mappedText = target
-                      ? `${target.fxName || "FX"} • ${target.paramName || `#${target.paramIdx}`}`
-                      : "Unmapped";
-
-                    return { knobId, label: `K${i + 1}`, mappedText, target };
-                  });
-
-                  return (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-3">
-                      {knobs.map((k) => (
-                        <button
-                          key={k.knobId}
-                          type="button"
-                          className="w-full text-left rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 px-4 py-4 min-h-[96px]"
-                          onClick={() => {
-                            commitKnobMapping?.({
-                              busId,
-                              knobId: k.knobId,
-                              trackGuid,
-                              fxGuid,
-                              paramIdx: idx,
-                              paramName: String(
-                                mapParam?.uiLabel || mapParam?.name || `Param ${idx}`
-                              ),
-                              fxName: pluginName,
-                              trackName: String(trackGuid),
-                              label: String(
-                                mapParam?.uiLabel || mapParam?.name || `Param ${idx}`
-                              ),
-                              invert: mapInverse,
-                            });
-
-                            setMapModalOpen(false);
-                            setMapParam(null);
-                            setMapInverse(false);
-                          }}
-                        >
-                          <div className="flex flex-col gap-2">
-                            <div className="text-[18px] font-semibold text-white">
-                              {k.label}
-                            </div>
-                            <div className="text-[14px] text-white/55 leading-snug line-clamp-2">
-                              {k.mappedText}
-                            </div>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  );
-                })()}
-              </div>
-            </div>
-          </div>
-        ) : null}
+        </div>
       </div>
     </div>
   );

@@ -1112,28 +1112,40 @@ export const useRfxStore = create((set, get) => ({
       const busMap = knobMapByBusId[busId] || {};
       const prevTargets = getKnobTargets(busMap, knobId);
 
-      if (prevTargets.some((t) => sameTarget(t, target))) {
-        return s;
-      }
+      const existingIndex = prevTargets.findIndex((t) => sameTarget(t, target));
 
-      if (prevTargets.length >= MAX_TARGETS_PER_KNOB) {
-        get().logEvent("knobmap:commit_rejected_full", {
-          busId,
-          knobId,
+      let nextTargets;
+
+      if (existingIndex >= 0) {
+        nextTargets = prevTargets.map((t, i) =>
+          i === existingIndex ? { ...t, ...target } : t
+        );
+
+        get().logEvent("knobmap:updated", {
+          ...target,
           knobIndex,
-          max: MAX_TARGETS_PER_KNOB,
-          attempted: target,
+          targetCount: nextTargets.length,
         });
-        return s;
+      } else {
+        if (prevTargets.length >= MAX_TARGETS_PER_KNOB) {
+          get().logEvent("knobmap:commit_rejected_full", {
+            busId,
+            knobId,
+            knobIndex,
+            max: MAX_TARGETS_PER_KNOB,
+            attempted: target,
+          });
+          return s;
+        }
+
+        nextTargets = [...prevTargets, target];
+
+        get().logEvent("knobmap:committed", {
+          ...target,
+          knobIndex,
+          targetCount: nextTargets.length,
+        });
       }
-
-      const nextTargets = [...prevTargets, target];
-
-      get().logEvent("knobmap:committed", {
-        ...target,
-        knobIndex,
-        targetCount: nextTargets.length,
-      });
 
       return {
         perf: {

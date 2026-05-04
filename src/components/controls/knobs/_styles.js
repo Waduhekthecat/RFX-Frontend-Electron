@@ -70,7 +70,7 @@ export const styles = {
 
   // ---- KnobRow ----
   rowOuter: {
-    height: "auto",
+    height: "100%",
     display: "flex",
     flexDirection: "column",
     justifyContent: "flex-start",
@@ -79,7 +79,7 @@ export const styles = {
 
   rowGrid: (count) => ({
     width: "100%",
-    height: "auto",
+    height: "100%",
     display: "grid",
     gridTemplateColumns: `repeat(${count || 1}, 1fr)`,
     justifyItems: "center",
@@ -110,11 +110,12 @@ export const styles = {
   }),
 
   expandToggleBtn: {
+    marginTop:20,
     width: "100%",
-    maxWidth: 140,
-    height: 140,
-    borderRadius: 20,
-    alignSelf: "end",
+    maxWidth: 100,
+    height: 100,
+    borderRadius: 30,
+    alignSelf: "start",
     border: "1px solid rgba(255,255,255,0.18)",
     background: "linear-gradient(180deg, rgba(255,255,255,0.08), rgba(0,0,0,0.35))",
     color: "rgba(255,255,255,0.9)",
@@ -123,7 +124,7 @@ export const styles = {
     alignItems: "center",
     justifyContent: "center",
     gap: 4,
-    cursor: "pointer",
+    cursor: "none",
     boxShadow: "0 16px 26px rgba(0,0,0,0.75)",
     transition: "transform 120ms ease, filter 120ms ease",
   },
