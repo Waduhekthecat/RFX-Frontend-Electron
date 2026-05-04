@@ -30,7 +30,7 @@ function readFxParam01(sources, fxGuid, paramIdx, fallback01 = 0.5) {
   return clamp01(fallback01);
 }
 
-export function KnobRow({ knobs, busId, mappingArmed, onDropMap }) {
+export function KnobRow({ knobs, busId, mappingArmed, onDropMap, mapDragActive = false }) {
   const dispatchIntent = useRfxStore((s) => s.dispatchIntent);
   const setKnobValueLocal = useRfxStore((s) => s.setKnobValueLocal);
   const commitKnobMapping = useRfxStore((s) => s.commitKnobMapping);
@@ -254,17 +254,24 @@ export function KnobRow({ knobs, busId, mappingArmed, onDropMap }) {
     [mappingArmed, commitKnobMapping, busKey]
   );
 
+  const canAcceptMapForKnob = React.useCallback(
+    (knobId) => getTargetsForKnob(knobId).length < 3,
+    [getTargetsForKnob]
+  );
+
+  const mapTargetCountsByKnobId = React.useMemo(() => {
+    const out = {};
+    for (const k of visibleKnobs) {
+      out[k.id] = getTargetsForKnob(k.id).length;
+    }
+    return out;
+  }, [visibleKnobs, getTargetsForKnob]);
+
   const renderValueFor = React.useCallback(
     (k) => {
       const id = k.id;
 
-      if (activeLocalKnobsRef.current.has(id)) {
-        return clamp01(localValues[id]);
-      }
-
-      return clamp01(
-        Number.isFinite(localValues[id]) ? localValues[id] : k.value
-      );
+      return clamp01(Number.isFinite(localValues[id]) ? localValues[id] : k.value);
     },
     [localValues]
   );
@@ -285,6 +292,8 @@ export function KnobRow({ knobs, busId, mappingArmed, onDropMap }) {
             onChange={(next) => onKnobChange(k.id, next)}
             onCommit={() => onKnobCommit(k.id)}
             onDropMap={onDropMap}
+            mapDragActive={mapDragActive}
+            canAcceptMap={canAcceptMapForKnob(k.id)}
           />
         ))}
       </div>
