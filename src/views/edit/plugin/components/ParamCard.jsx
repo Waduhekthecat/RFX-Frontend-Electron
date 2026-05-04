@@ -21,6 +21,8 @@ function ParamCardImpl({
   onCommit01,
   onMap,
   onUnmap,
+  onMapDragStart,
+  onMapDragEnd,
   mappedKnobs = [],
 }) {
   const paramIdx = Number(p?.idx ?? 0);
@@ -194,20 +196,38 @@ function ParamCardImpl({
             </div>
           ) : null}
 
+          {mapped ? (
+            <button
+              type="button"
+              onClick={() => onUnmap?.(liveParam || p)}
+              className="h-8 px-3 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-[11px] font-semibold text-white/80"
+              title="Unmap this parameter from knobs on this bus"
+            >
+              UNMAP
+            </button>
+          ) : null}
+
           <button
             type="button"
-            onClick={() => {
-              if (mapped) onUnmap?.(liveParam || p);
-              else onMap?.(liveParam || p);
+            draggable
+            onDragStart={(e) => {
+              if (e.dataTransfer) {
+                e.dataTransfer.setData("text/plain", `map:${fxGuid}:${paramIdx}`);
+                e.dataTransfer.effectAllowed = "copy";
+              }
+              onMapDragStart?.(liveParam || p);
             }}
-            className="h-8 px-3 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-[11px] font-semibold text-white/80"
-            title={
-              mapped
-                ? "Unmap this parameter from knobs on this bus"
-                : "Map to a macro knob"
-            }
+            onDragEnd={() => onMapDragEnd?.()}
+            className="h-10 w-10 rounded-xl border border-cyan-300/45 bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-100 flex items-center justify-center shadow-[0_0_0_1px_rgba(34,211,238,0.25)]"
+            title="Drag to a macro knob to map"
+            aria-label="Drag to map parameter"
           >
-            {mapped ? "UNMAP" : "MAP"}
+            <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 7h13" />
+              <path d="M12 3l4 4-4 4" />
+              <path d="M7 14.5a4.5 4.5 0 1 1 9 0V20h-9z" />
+              <path d="M11.5 17h.01" />
+            </svg>
           </button>
         </div>
       </div>
@@ -242,12 +262,13 @@ function ParamCardImpl({
 export const ParamCard = React.memo(
   ParamCardImpl,
   (prev, next) =>
-    prev.trackGuid === next.trackGuid &&
+    // prev.trackGuid === next.trackGuid &&
     prev.fxGuid === next.fxGuid &&
     prev.p === next.p &&
     prev.onChange01 === next.onChange01 &&
     prev.onCommit01 === next.onCommit01 &&
-    prev.onMap === next.onMap &&
+    prev.onMapDragStart === next.onMapDragStart &&
+    prev.onMapDragEnd === next.onMapDragEnd &&
     prev.onUnmap === next.onUnmap &&
     prev.mappedKnobs === next.mappedKnobs
 );

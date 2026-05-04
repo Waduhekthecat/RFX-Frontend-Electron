@@ -17,6 +17,8 @@ function normalizeKnobTargets(raw) {
   return Array.isArray(raw) ? raw : [raw];
 }
 
+const MAX_TARGETS_PER_KNOB = 3;
+
 function getPrimaryKnobTarget(raw) {
   const targets = normalizeKnobTargets(raw);
   return targets[0] || null;
@@ -289,7 +291,7 @@ export function PluginView() {
         </Panel>
 
         {mapModalOpen ? (
-          <div className="fixed inset-0 z-[1000] flex items-center justify-center">
+          <div className="fixed inset-0 z-[1000] flex items-center justify-center px-[30px]">
             <div
               className="absolute inset-0 bg-black/60"
               onClick={() => {
@@ -299,15 +301,15 @@ export function PluginView() {
             />
 
             <div
-              className="relative w-[560px] max-w-[92vw] rounded-2xl border border-white/10 bg-[#0b0f14] shadow-2xl"
+              className="relative w-full rounded-2xl border border-white/10 bg-[#0b0f14] shadow-2xl"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="p-4 flex items-start justify-between gap-3">
+              <div className="p-6 flex items-start justify-between gap-4">
                 <div className="min-w-0">
-                  <div className="text-[14px] font-semibold text-white">
+                  <div className="text-[20px] font-semibold text-white">
                     Map parameter to knob
                   </div>
-                  <div className="text-[11px] text-white/45 truncate">
+                  <div className="text-[15px] text-white/45 truncate">
                     {pluginName}
                     {" • "}
                     {String(
@@ -325,8 +327,8 @@ export function PluginView() {
                   onClick={() => setMapInverse((prev) => !prev)}
                   className={
                     mapInverse
-                      ? "h-8 px-3 rounded-xl border border-cyan-300/60 bg-cyan-400/20 hover:bg-cyan-400/30 text-[11px] font-semibold text-cyan-100"
-                      : "h-8 px-3 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-[11px] font-semibold text-white/80"
+                      ? "h-11 px-5 rounded-xl border border-cyan-300/60 bg-cyan-400/20 hover:bg-cyan-400/30 text-[14px] font-semibold text-cyan-100"
+                      : "h-11 px-5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-[14px] font-semibold text-white/80"
                   }
                 >
                   {mapInverse ? "INVERSE" : "LINEAR"}
@@ -339,7 +341,7 @@ export function PluginView() {
                     setMapParam(null);
                     setMapInverse(false);
                   }}
-                  className="h-8 px-3 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-[11px] font-semibold text-white/80"
+                  className="h-11 px-5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-[14px] font-semibold text-white/80"
                 >
                   CLOSE
                 </button>
@@ -347,7 +349,7 @@ export function PluginView() {
 
               <div className="h-px bg-white/10" />
 
-              <div className="p-4">
+              <div className="p-6">
                 {(() => {
                   const busId = modalBusId;
                   const idx = modalParamIdx;
@@ -374,12 +376,12 @@ export function PluginView() {
                   });
 
                   return (
-                    <div className="grid grid-cols-1 gap-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-3">
                       {knobs.map((k) => (
                         <button
                           key={k.knobId}
                           type="button"
-                          className="w-full text-left rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 px-3 py-2"
+                          className="w-full text-left rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 px-4 py-4 min-h-[96px]"
                           onClick={() => {
                             commitKnobMapping?.({
                               busId,
@@ -403,11 +405,11 @@ export function PluginView() {
                             setMapInverse(false);
                           }}
                         >
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="text-[12px] font-semibold text-white">
+                          <div className="flex flex-col gap-2">
+                            <div className="text-[18px] font-semibold text-white">
                               {k.label}
                             </div>
-                            <div className="text-[11px] text-white/50 truncate">
+                            <div className="text-[14px] text-white/55 leading-snug line-clamp-2">
                               {k.mappedText}
                             </div>
                           </div>
