@@ -40,12 +40,16 @@ export function Knob({
   onCommit,
   mapDragActive = false,
   canAcceptMap = true,
+  onLongPress,
 }) {
   const [dragging, setDragging] = React.useState(false);
   const startRef = React.useRef(null);
   const lastTapRef = React.useRef(0);
   const [nat, setNat] = React.useState(null);
   const [mapDragOver, setMapDragOver] = React.useState(false);
+  const longPressTimerRef = React.useRef(0);
+  const longPressFiredRef = React.useRef(false);
+  const pendingPressRef = React.useRef(null);
 
   // ✅ display value for smoothing incoming mapped/store updates
   const targetValue = clamp01(value);
@@ -62,6 +66,7 @@ export function Knob({
   React.useEffect(() => () => {
     setGlobalDragLock(false);
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
   }, []);
 
   // ✅ smooth external updates, but do not fight active drag
@@ -123,6 +128,13 @@ export function Knob({
     onCommit?.();
   }
 
+  function clearLongPressTimer() {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = 0;
+    }
+  }
+
   function resetToCenter() {
     const next = 0.5;
     setDisplayValue(next);
@@ -156,16 +168,33 @@ export function Knob({
 
     el.setPointerCapture?.(pointerId);
 
-    setGlobalDragLock(true);
-    setDragging(true);
-
-    startRef.current = { y: e.clientY, v: displayValue, pointerId };  }
+    pendingPressRef.current = { y: e.clientY, v: displayValue, pointerId };
+    startRef.current = null;
+    longPressFiredRef.current = false;
+    clearLongPressTimer();
+    longPressTimerRef.current = setTimeout(() => {
+      longPressFiredRef.current = true;
+      onLongPress?.(id);
+    }, 850);
+  }
 
   function onPointerMove(e) {
-    if (!dragging || !startRef.current) return;
+    if (!pendingPressRef.current && !startRef.current) return;
     e.preventDefault();
     e.stopPropagation();
 
+    if (!startRef.current && pendingPressRef.current) {
+      const movePx = Math.abs(e.clientY - pendingPressRef.current.y);
+      if (movePx >= 3) {
+        clearLongPressTimer();
+        startRef.current = pendingPressRef.current;
+        pendingPressRef.current = null;
+        setGlobalDragLock(true);
+        setDragging(true);
+      }
+    }
+
+    if (!dragging || !startRef.current) return;
     const dy = startRef.current.y - e.clientY;
     const next = clamp01(startRef.current.v + dy / 250);
 
@@ -175,6 +204,13 @@ export function Knob({
   }
 
   function onPointerUp(e) {
+    clearLongPressTimer();
+    pendingPressRef.current = null;
+    if (longPressFiredRef.current) {
+      longPressFiredRef.current = false;
+      finishDrag(e.currentTarget, startRef.current?.pointerId ?? e.pointerId);
+      return;
+    }
     finishDrag(e.currentTarget, startRef.current?.pointerId ?? e.pointerId);
   }
 
@@ -184,6 +220,9 @@ export function Knob({
 
   function onLostPointerCapture(e) {
     if (dragging) {
+      clearLongPressTimer();
+      pendingPressRef.current = null;
+      longPressFiredRef.current = false;
       finishDrag(e.currentTarget, startRef.current?.pointerId ?? e.pointerId);
     }
   }

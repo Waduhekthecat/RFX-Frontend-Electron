@@ -357,6 +357,14 @@ export function KnobRow({
     [mappingArmed, commitKnobMapping, busKey]
   );
 
+  const onKnobLongPressExpand = React.useCallback(() => {
+    setExpanded((prev) => {
+      if (prev) return prev;
+      onExpandedChange?.(true);
+      return true;
+    });
+  }, [onExpandedChange]);
+
   const canAcceptMapForKnob = React.useCallback(
     (knobId) => getTargetsForKnob(knobId).length < MAX_NUMBER_MAPPABLE,
     [getTargetsForKnob]
@@ -367,11 +375,11 @@ export function KnobRow({
     [localValues]
   );
 
-  const toggleExpanded = React.useCallback(() => {
+  const collapseExpanded = React.useCallback(() => {
     setExpanded((prev) => {
-      const next = !prev;
-      onExpandedChange?.(next);
-      return next;
+      if (!prev) return prev;
+      onExpandedChange?.(false);
+      return false;
     });
   }, [onExpandedChange]);
 
@@ -435,17 +443,17 @@ export function KnobRow({
               onDropMap={onDropMap}
               mapDragActive={mapDragActive}
               canAcceptMap={canAcceptMapForKnob(k.id)}
+              onLongPress={onKnobLongPressExpand}
             />
           ))}
 
           <button
             type="button"
-            onClick={toggleExpanded}
+            onClick={collapseExpanded}
             style={styles.expandToggleBtn}
-            title="Toggle expanded knob row"
+            title="Collapse expanded knob row"
           >
-            <span style={styles.expandToggleGlyph}>{expanded ? "▾" : "▴"}</span>
-            <span style={styles.expandToggleText}>{expanded ? "HIDE" : "MAPS"}</span>
+            <span style={styles.expandToggleGlyph}>{expanded ? "▾" : ""}</span>
           </button>
         </div>
       </div>
