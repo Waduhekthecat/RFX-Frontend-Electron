@@ -34,6 +34,7 @@ export function Knob({
   mapped,
   mappedLabel,
   mappingArmed,
+  onDropMap,
   onTap,
   onChange,
   onCommit,
@@ -204,6 +205,18 @@ export function Knob({
         onLostPointerCapture={onLostPointerCapture}
         className="select-none"
         style={styles.knobFace(dragging)}
+        onDragOver={(e) => {
+          if (!onDropMap) return;
+          e.preventDefault();
+          if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+        }}
+        onDrop={(e) => {
+          if (!onDropMap) return;
+          e.preventDefault();
+          e.stopPropagation();
+          const payload = e.dataTransfer?.getData("text/plain") || "";
+          onDropMap?.(id, payload);
+        }}
       >
         <img
           src={knobStripUrl}

@@ -105,6 +105,54 @@ export function PluginView() {
   const [mapParam, setMapParam] = React.useState(null);
   const [mapInverse, setMapInverse] = React.useState(false);
 
+    const [dragMappingParam, setDragMappingParam] = React.useState(null);
+
+  const onMapDragStart = React.useCallback((p) => {
+    if (!p) return;
+    const idx = Number(p.idx);
+    if (!Number.isFinite(idx)) return;
+    setDragMappingParam(p);
+  }, []);
+
+  const onMapDragEnd = React.useCallback(() => {
+    setDragMappingParam(null);
+  }, []);
+
+  const onDropMapToKnob = React.useCallback(
+    (knobId, payload) => {
+      const busId = String(activeBusId || "");
+      if (!busId || !knobId) return;
+
+      let idx = Number(dragMappingParam?.idx);
+      if (!Number.isFinite(idx)) {
+        const m = String(payload || "").match(/^map:([^:]+):(\d+)$/);
+        if (!m) return;
+        if (String(m[1]) !== String(fxGuid)) return;
+        idx = Number(m[2]);
+      }
+      if (!Number.isFinite(idx)) return;
+
+      const src = dragMappingParam || params.find((x) => Number(x?.idx) === idx) || null;
+
+      commitKnobMapping?.({
+        busId,
+        knobId,
+        trackGuid,
+        fxGuid,
+        paramIdx: idx,
+        paramName: String(src?.uiLabel || src?.name || `Param ${idx}`),
+        fxName: pluginName,
+        trackName: String(trackGuid),
+        label: String(src?.uiLabel || src?.name || `Param ${idx}`),
+        invert: false,
+      });
+
+      setDragMappingParam(null);
+    },
+    [activeBusId, dragMappingParam, fxGuid, params, commitKnobMapping, trackGuid, pluginName]
+  );
+
+
   const mappedKnobsByParamIdx = React.useMemo(() => {
     const busId = String(activeBusId || "");
     if (!busId) return EMPTY_OBJ;
@@ -276,6 +324,8 @@ export function PluginView() {
                     onMap={onMap}
                     onUnmap={onUnmap}
                     mappedKnobs={mappedKnobs}
+                    onMapDragStart={onMapDragStart}
+                    onMapDragEnd={onMapDragEnd}
                   />
                 );
               })}
@@ -287,7 +337,12 @@ export function PluginView() {
           className={styles.KnobPanel}
           style={{ height: KNOB_STRIP_H, flex: `0 0 ${KNOB_STRIP_H}px` }}
         >
-          <KnobRow knobs={bottomKnobs} busId={bottomBusId} mappingArmed={mappingArmed} />
+          <KnobRow
+            knobs={bottomKnobs}
+            busId={bottomBusId}
+            mappingArmed={mappingArmed}
+            onDropMap={onDropMapToKnob}
+          />
         </Panel>
 
         {mapModalOpen ? (

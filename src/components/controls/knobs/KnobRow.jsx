@@ -30,7 +30,7 @@ function readFxParam01(sources, fxGuid, paramIdx, fallback01 = 0.5) {
   return clamp01(fallback01);
 }
 
-export function KnobRow({ knobs, busId, mappingArmed }) {
+export function KnobRow({ knobs, busId, mappingArmed, onDropMap }) {
   const dispatchIntent = useRfxStore((s) => s.dispatchIntent);
   const setKnobValueLocal = useRfxStore((s) => s.setKnobValueLocal);
   const commitKnobMapping = useRfxStore((s) => s.commitKnobMapping);
@@ -284,6 +284,7 @@ export function KnobRow({ knobs, busId, mappingArmed }) {
             onTap={onKnobTap}
             onChange={(next) => onKnobChange(k.id, next)}
             onCommit={() => onKnobCommit(k.id)}
+            onDropMap={onDropMap}
           />
         ))}
       </div>
