@@ -342,6 +342,7 @@ export function PluginView() {
             busId={bottomBusId}
             mappingArmed={mappingArmed}
             onDropMap={onDropMapToKnob}
+            mapDragActive={!!dragMappingParam}
           />
         </Panel>
 

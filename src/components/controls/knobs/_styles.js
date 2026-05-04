@@ -14,8 +14,7 @@ export const styles = {
     gap: 0,
   }),
 
-  knobFace: (dragging) => ({
-    width: RENDER_SIZE,
+  knobFace: ({ dragging, mapDragActive, canAcceptMap, mapDragOver }) => ({    width: RENDER_SIZE,
     height: RENDER_SIZE,
     borderRadius: 999,
     overflow: "hidden",
@@ -24,9 +23,15 @@ export const styles = {
     cursor: "ns-resize",
     background: "transparent",
     border: "none",
-    filter: dragging
-      ? "drop-shadow(0px 8px 14px rgba(0,0,0,0.60))"
-      : "drop-shadow(0px 16px 26px rgba(0,0,0,0.85))",
+    transform: mapDragOver ? "scale(1.06)" : "scale(1)",
+    transition: "transform 120ms ease, filter 120ms ease",
+    filter: mapDragOver
+      ? "drop-shadow(0px 0px 18px rgba(142,224,255,0.48)) drop-shadow(0px 16px 26px rgba(0,0,0,0.78))"
+      : mapDragActive && canAcceptMap
+        ? "drop-shadow(0px 0px 10px rgba(142,224,255,0.30)) drop-shadow(0px 16px 26px rgba(0,0,0,0.82))"
+        : dragging
+          ? "drop-shadow(0px 8px 14px rgba(0,0,0,0.60))"
+          : "drop-shadow(0px 16px 26px rgba(0,0,0,0.85))",
   }),
 
   knobImg: (stripW, stripH, y) => ({

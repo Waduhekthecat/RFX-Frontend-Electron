@@ -38,11 +38,14 @@ export function Knob({
   onTap,
   onChange,
   onCommit,
+  mapDragActive = false,
+  canAcceptMap = true,
 }) {
   const [dragging, setDragging] = React.useState(false);
   const startRef = React.useRef(null);
   const lastTapRef = React.useRef(0);
   const [nat, setNat] = React.useState(null);
+  const [mapDragOver, setMapDragOver] = React.useState(false);
 
   // ✅ display value for smoothing incoming mapped/store updates
   const targetValue = clamp01(value);
@@ -113,7 +116,9 @@ export function Knob({
 
     try {
       if (el && pointerId != null) el.releasePointerCapture?.(pointerId);
-    } catch {}
+    } catch (err) {
+      void err;
+    }
 
     onCommit?.();
   }
@@ -204,14 +209,24 @@ export function Knob({
         onPointerCancel={onPointerCancel}
         onLostPointerCapture={onLostPointerCapture}
         className="select-none"
-        style={styles.knobFace(dragging)}
+        style={styles.knobFace({ dragging, mapDragActive, canAcceptMap, mapDragOver })}
+        onDragEnter={(e) => {
+          if (!onDropMap || !canAcceptMap) return;
+          e.preventDefault();
+          setMapDragOver(true);
+        }}
         onDragOver={(e) => {
-          if (!onDropMap) return;
+          if (!onDropMap || !canAcceptMap) return;
           e.preventDefault();
           if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+          if (!mapDragOver) setMapDragOver(true);
+        }}
+        onDragLeave={() => {
+          if (mapDragOver) setMapDragOver(false);
         }}
         onDrop={(e) => {
-          if (!onDropMap) return;
+          setMapDragOver(false);
+          if (!onDropMap || !canAcceptMap) return;
           e.preventDefault();
           e.stopPropagation();
           const payload = e.dataTransfer?.getData("text/plain") || "";
