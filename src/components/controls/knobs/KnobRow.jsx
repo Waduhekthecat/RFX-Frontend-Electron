@@ -366,6 +366,11 @@ export function KnobRow({
     });
   }, [onExpandedChange]);
 
+  const knobHasMappedTarget = React.useCallback(
+    (knobId) => getTargetsForKnob(knobId).length > 0,
+    [getTargetsForKnob]
+  );
+
   const canAcceptMapForKnob = React.useCallback(
     (knobId) => getTargetsForKnob(knobId).length < MAX_NUMBER_MAPPABLE,
     [getTargetsForKnob]
@@ -385,24 +390,24 @@ export function KnobRow({
   }, [onExpandedChange]);
 
   const REVEAL_H = EXPANDED_H - COLLAPSED_H;
-  
+
   return (
     <div
-    style={{
-      height: expanded ? EXPANDED_H : COLLAPSED_H,
-      transition: "height 400ms ease",
-      overflow: "hidden",
-      minHeight: 0,
-    }}
-  >
-    <Panel
       style={{
-        height: "100%",
-        display: "flex",
-        flexDirection: "column",
+        height: expanded ? EXPANDED_H : COLLAPSED_H,
+        transition: "height 400ms ease",
         overflow: "hidden",
-        position: "relative",
-        background: `
+        minHeight: 0,
+      }}
+    >
+      <Panel
+        style={{
+          height: "100%",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          position: "relative",
+          background: `
           linear-gradient(
             180deg,
             rgba(255,255,255,0.08),
@@ -418,106 +423,107 @@ export function KnobRow({
           ),
           #1a1a1a
         `,
-        boxShadow: `
+          boxShadow: `
           inset 0 1px 0 rgba(255,255,255,0.20),
           inset 0 -8px 18px rgba(0,0,0,0.7),
           0 20px 40px rgba(0,0,0,0.6)
         `,
-      }}
-    >
-      <div
-        style={{
-          height: expanded ? 196 : 520,
-          transition: "height 1000ms ease",
-          overflow: "hidden",
-          flex: "0 0 auto",
         }}
       >
         <div
           style={{
-            ...styles.rowGrid(7),
-            height: "100%",
-            background: "transparent",
-            boxShadow: "none",
+            height: expanded ? 196 : 520,
+            transition: "height 1000ms ease",
+            overflow: "hidden",
+            flex: "0 0 auto",
           }}
         >
-          {interactiveKnobs.map((k) => (
-            <Knob
-              key={k.id}
-              id={k.id}
-              label={k.label}
-              mapped={!!k.mapped}
-              mappedLabel={k.mappedLabel || (k.mapped ? "Mapped" : "")}
-              value={renderValueFor(k)}
-              mappingArmed={!!mappingArmed}
-              onTap={onKnobTap}
-              onChange={(next) => onKnobChange(k.id, next)}
-              onCommit={() => onKnobCommit(k.id)}
-              onDropMap={onDropMap}
-              mapDragActive={mapDragActive}
-              canAcceptMap={canAcceptMapForKnob(k.id)}
-              onLongPress={onKnobLongPressExpand}
-            />
-          ))}
-
-          <button
-            type="button"
-            onClick={collapseExpanded}
-            style={styles.expandToggleBtn}
-            title="Collapse expanded knob row"
+          <div
+            style={{
+              ...styles.rowGrid(7),
+              height: "100%",
+              background: "transparent",
+              boxShadow: "none",
+            }}
           >
-            <span style={styles.expandToggleGlyph}>{expanded ? "▾" : ""}</span>
-          </button>
-        </div>
-      </div>
+            {interactiveKnobs.map((k) => (
+              <Knob
+                key={k.id}
+                id={k.id}
+                label={k.label}
+                mapped={!!k.mapped}
+                mappedLabel={k.mappedLabel || (k.mapped ? "Mapped" : "")}
+                value={renderValueFor(k)}
+                mappingArmed={!!mappingArmed}
+                onTap={onKnobTap}
+                onChange={(next) => onKnobChange(k.id, next)}
+                onCommit={() => onKnobCommit(k.id)}
+                onDropMap={onDropMap}
+                mapDragActive={mapDragActive}
+                canAcceptMap={canAcceptMapForKnob(k.id)}
+                onLongPress={onKnobLongPressExpand}
+                interactive={mappingArmed || knobHasMappedTarget(k.id)}
+              />
+            ))}
 
-      <div
-        style={{
-          flex: "0 0 auto",
-          minHeight: 0,
-          padding: expanded ? "16px 20px" : "0 20px",
-          overflow: "hidden",
-          height: expanded ? 600 : 0,
-          opacity: expanded ? 1 : 0,
-          transition: "height 1000ms ease, opacity 1000ms ease, padding 1000ms ease",
-        }}
-      >
+            <button
+              type="button"
+              onClick={collapseExpanded}
+              style={styles.expandToggleBtn}
+              title="Collapse expanded knob row"
+            >
+              <span style={styles.expandToggleGlyph}>{expanded ? "▾" : ""}</span>
+            </button>
+          </div>
+        </div>
+
         <div
           style={{
-            height: "100%",
-            display: "grid",
-            gridTemplateRows: "repeat(3, minmax(0, 1fr)) 56px",
-            gap: 12,
+            flex: "0 0 auto",
+            minHeight: 0,
+            padding: expanded ? "16px 20px" : "0 20px",
+            overflow: "hidden",
+            height: expanded ? 600 : 0,
+            opacity: expanded ? 1 : 0,
+            transition: "height 1000ms ease, opacity 1000ms ease, padding 1000ms ease",
           }}
         >
-          {Array.from({ length: 4 }).map((_, rowIdx) => {
-            const entry = mappedParamsForExpandedView[rowIdx];
+          <div
+            style={{
+              height: "100%",
+              display: "grid",
+              gridTemplateRows: "repeat(3, minmax(0, 1fr)) 56px",
+              gap: 12,
+            }}
+          >
+            {Array.from({ length: 4 }).map((_, rowIdx) => {
+              const entry = mappedParamsForExpandedView[rowIdx];
 
-            return (
-              <div key={`map-row-${rowIdx}`} style={{ minHeight: 0 }}>
-                {rowIdx < 3 && entry ? (
-                  <MapCard
-                    paramName={entry.paramName}
-                    pluginName={entry.pluginName}
-                    value01={readFxParam01(
-                      fxParamSources,
-                      entry.fxGuid,
-                      entry.paramIdx,
-                      0.5
-                    )}
-                    invert={entry.invert === true}
-                    onChange01={(next) => onMappedParamChange(entry, next)}
-                    onToggleInvert={() => onToggleMappedInvert(entry)}
-                    onUnmap={() => onUnmapMappedParam(entry)}
-                    onRange={() => console.log("range", entry)}
-                    onExtra={() => console.log("extra", entry)}
-                  />
-                ) : null}
-              </div>
-            );
-          })}
+              return (
+                <div key={`map-row-${rowIdx}`} style={{ minHeight: 0 }}>
+                  {rowIdx < 3 && entry ? (
+                    <MapCard
+                      paramName={entry.paramName}
+                      pluginName={entry.pluginName}
+                      value01={readFxParam01(
+                        fxParamSources,
+                        entry.fxGuid,
+                        entry.paramIdx,
+                        0.5
+                      )}
+                      invert={entry.invert === true}
+                      onChange01={(next) => onMappedParamChange(entry, next)}
+                      onToggleInvert={() => onToggleMappedInvert(entry)}
+                      onUnmap={() => onUnmapMappedParam(entry)}
+                      onRange={() => console.log("range", entry)}
+                      onExtra={() => console.log("extra", entry)}
+                    />
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
         </div>
-      </div>
-    </Panel></div>
+      </Panel></div>
   );
 }

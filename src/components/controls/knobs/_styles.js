@@ -15,14 +15,16 @@ export const styles = {
   }),
 
   // knobFace: ({ dragging, mapDragActive, canAcceptMap, mapDragOver, longPressing }) => ({    
-    knobFace: ({ dragging, mapDragActive, canAcceptMap, mapDragOver, pressing }) => ({    
+  // knobFace: ({ dragging, mapDragActive, canAcceptMap, mapDragOver, pressing }) => ({    
+  knobFace: ({ dragging, mapDragActive, canAcceptMap, mapDragOver, pressing, interactive }) => ({
     width: RENDER_SIZE,
     height: RENDER_SIZE,
     borderRadius: 999,
     overflow: "hidden",
     position: "relative",
     touchAction: "none",
-    cursor: "ns-resize",
+    // cursor: "ns-resize",
+    cursor: interactive ? "ns-resize" : "default",
     background: "transparent",
     border: "none",
     transform: mapDragOver ? "scale(1.06)" : "scale(1)",
@@ -32,11 +34,12 @@ export const styles = {
       // : longPressing
       : pressing
         ? "drop-shadow(0px 0px 14px rgba(142,224,255,0.34)) drop-shadow(0px 16px 26px rgba(0,0,0,0.80))"
-      : mapDragActive && canAcceptMap
-        ? "drop-shadow(0px 0px 10px rgba(142,224,255,0.30)) drop-shadow(0px 16px 26px rgba(0,0,0,0.82))"
-        : dragging
-          ? "drop-shadow(0px 8px 14px rgba(0,0,0,0.60))"
-          : "drop-shadow(0px 16px 26px rgba(0,0,0,0.85))",
+        : mapDragActive && canAcceptMap
+          ? "drop-shadow(0px 0px 10px rgba(142,224,255,0.30)) drop-shadow(0px 16px 26px rgba(0,0,0,0.82))"
+          : dragging
+            // ? "drop-shadow(0px 8px 14px rgba(0,0,0,0.60))"
+            ? "drop-shadow(0px 0px 14px rgba(142,224,255,0.34)) drop-shadow(0px 16px 26px rgba(0,0,0,0.80))"
+            : "drop-shadow(0px 16px 26px rgba(0,0,0,0.85))",
   }),
 
   knobImg: (stripW, stripH, y) => ({
@@ -116,7 +119,7 @@ export const styles = {
   }),
 
   expandToggleBtn: {
-    marginTop:20,
+    marginTop: 20,
     width: "100%",
     maxWidth: 100,
     height: 100,

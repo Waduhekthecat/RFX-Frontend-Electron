@@ -41,6 +41,7 @@ export function Knob({
   mapDragActive = false,
   canAcceptMap = true,
   onLongPress,
+  interactive = true,
 }) {
   const [dragging, setDragging] = React.useState(false);
   const startRef = React.useRef(null);
@@ -151,6 +152,7 @@ export function Knob({
   }
 
   function onPointerDown(e) {
+    if (!interactive) return;
     e.preventDefault();
     e.stopPropagation();
 
@@ -186,6 +188,7 @@ export function Knob({
   }
 
   function onPointerMove(e) {
+    if (!interactive) return;
     if (!pendingPressRef.current && !startRef.current) return;
     e.preventDefault();
     e.stopPropagation();
@@ -211,6 +214,7 @@ export function Knob({
   }
 
   function onPointerUp(e) {
+    if (!interactive) return;
     clearLongPressTimer();
     setPressing(false);
     pendingPressRef.current = null;
@@ -223,10 +227,12 @@ export function Knob({
   }
 
   function onPointerCancel(e) {
+    if (!interactive) return;
     finishDrag(e.currentTarget, startRef.current?.pointerId ?? e.pointerId);
   }
 
   function onLostPointerCapture(e) {
+    if (!interactive) return;
     if (dragging) {
       clearLongPressTimer();
       pendingPressRef.current = null;
@@ -257,7 +263,8 @@ export function Knob({
         onLostPointerCapture={onLostPointerCapture}
         className="select-none"
         // style={styles.knobFace({ dragging, mapDragActive, canAcceptMap, mapDragOver, longPressing })}
-        style={styles.knobFace({ dragging, mapDragActive, canAcceptMap, mapDragOver, pressing })}
+        // style={styles.knobFace({ dragging, mapDragActive, canAcceptMap, mapDragOver, pressing })}
+        style={styles.knobFace({ dragging, mapDragActive, canAcceptMap, mapDragOver, pressing, interactive })}
 
         onDragEnter={(e) => {
           if (!onDropMap || !canAcceptMap) return;
