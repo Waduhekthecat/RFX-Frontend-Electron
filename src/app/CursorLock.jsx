@@ -1,7 +1,10 @@
 import { useEffect } from "react";
 
 const STYLE_ID = "cursor-lock";
-const CSS = `*, *::before, *::after { cursor: none !important; user-select: none !important; -webkit-user-select: none !important; }`;
+const CSS = `*, *::before, *::after { 
+user-select: none !important; -webkit-user-select: none !important; }`;
+
+/* cursor: none !important; */
 
 function injectStyle() {
   if (document.getElementById(STYLE_ID)) return;
@@ -14,8 +17,8 @@ function injectStyle() {
 export function CursorLock() {
   useEffect(() => {
     injectStyle();
-    document.documentElement.style.cursor = "none";
-    document.body.style.cursor = "none";
+    // document.documentElement.style.cursor = "none";
+    // document.body.style.cursor = "none";
 
     return () => {
       document.getElementById(STYLE_ID)?.remove();
@@ -36,6 +39,6 @@ export function reassertCursorLock() {
   } else {
     injectStyle();
   }
-  document.documentElement.style.cursor = "none";
-  document.body.style.cursor = "none";
+  // document.documentElement.style.cursor = "none";
+  // document.body.style.cursor = "none";
 }

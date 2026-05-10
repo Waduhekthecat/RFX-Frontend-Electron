@@ -200,10 +200,11 @@ function launchReaper() {
 }
 
 function chooseTargetDisplay() {
-  const displays = screen.getAllDisplays();
-  const primary = screen.getPrimaryDisplay();
-  if (!Array.isArray(displays) || displays.length === 0) return primary;
-  return displays.find((d) => d.id !== primary.id) || primary;
+  // const displays = screen.getAllDisplays();
+  // const primary = screen.getPrimaryDisplay();
+  // if (!Array.isArray(displays) || displays.length === 0) return primary;
+  // return displays.find((d) => d.id !== primary.id) || primary;
+  return screen.getPrimaryDisplay();
 }
 
 function createWindow() {
@@ -227,7 +228,8 @@ function createWindow() {
     backgroundColor: "#000000",
     frame: false,
     fullscreen: true,
-    kiosk: true,
+    // kiosk: true,
+    kiosk: false,
     autoHideMenuBar: true,
     movable: false,
     minimizable: false,
@@ -250,7 +252,7 @@ function createWindow() {
   mainWindow.setFullScreen(true);
 
   if (!IS_DEV) {
-    mainWindow.setKiosk(true);
+    // mainWindow.setKiosk(true);
     mainWindow.setAlwaysOnTop(true, "screen-saver");
   } else {
     mainWindow.setAlwaysOnTop(false);
@@ -260,7 +262,7 @@ function createWindow() {
     if (!mainWindow || mainWindow.isDestroyed()) return;
     mainWindow.setBounds({ x, y, width, height });
     mainWindow.setFullScreen(true);
-    if (!IS_DEV) mainWindow.setKiosk(true);
+    // if (!IS_DEV) mainWindow.setKiosk(true);
     mainWindow.show();
     mainWindow.focus();
   });
