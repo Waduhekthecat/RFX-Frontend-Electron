@@ -357,12 +357,26 @@ export function KnobRow({
     [busKey, unmapParamFromBus]
   );
 
+  const knobHasMappedTarget = React.useCallback(
+    (knobId) => getTargetsForKnob(knobId).length > 0,
+    [getTargetsForKnob]
+  );
+  
   const onKnobTap = React.useCallback(
     (knobId) => {
-      if (!mappingArmed) return;
-      commitKnobMapping({ busId: busKey, knobId });
+      // if (!mappingArmed) return;
+      // commitKnobMapping({ busId: busKey, knobId });
+      if (mappingArmed) {
+        commitKnobMapping({ busId: busKey, knobId });
+        return;
+      }
+
+      if (!expanded) return;
+      if (!knobHasMappedTarget(knobId)) return;
+      setExpandedKnobId(knobId);
     },
-    [mappingArmed, commitKnobMapping, busKey]
+    // [mappingArmed, commitKnobMapping, busKey]
+    [mappingArmed, commitKnobMapping, busKey, expanded, knobHasMappedTarget]
   );
 
   // const onKnobLongPressExpand = React.useCallback(() => {
@@ -375,8 +389,10 @@ export function KnobRow({
   //   });
   //   setExpandedKnobId(null);
   // }, [onExpandedChange]);
+
   const onKnobLongPressExpand = React.useCallback(
     (knobId) => {
+      // if (expanded) return;
       setExpandedKnobId(knobId);
       setExpanded((prev) => {
         if (prev) return prev;
@@ -385,11 +401,7 @@ export function KnobRow({
       });
     },
     [onExpandedChange]
-  );
-
-  const knobHasMappedTarget = React.useCallback(
-    (knobId) => getTargetsForKnob(knobId).length > 0,
-    [getTargetsForKnob]
+    // [expanded, onExpandedChange]
   );
 
   const canAcceptMapForKnob = React.useCallback(
@@ -487,6 +499,7 @@ export function KnobRow({
                 onLongPress={() => onKnobLongPressExpand(k.id)}
                 interactive={mappingArmed || knobHasMappedTarget(k.id)}
                 dimmed={expanded && expandedKnobId !== k.id}
+                yOffset={expanded ? (expandedKnobId === k.id ? -5 : 5) : 0}
               />
             ))}
 

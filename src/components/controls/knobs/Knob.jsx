@@ -43,6 +43,7 @@ export function Knob({
   onLongPress,
   interactive = true,
   dimmed = false,
+  yOffset = 0,
 }) {
   const [dragging, setDragging] = React.useState(false);
   const startRef = React.useRef(null);
@@ -275,7 +276,9 @@ export function Knob({
         ...styles.knobWrap(containerW),
         opacity: dimmed ? 0.45 : 1,
         filter: dimmed ? "saturate(0.7)" : "none",
-        transition: "opacity 180ms ease, filter 180ms ease",
+        // transition: "opacity 180ms ease, filter 180ms ease",
+        transform: `translateY(${yOffset}px)`,
+        transition: "opacity 180ms ease, filter 180ms ease, transform 180ms ease",
       }}
     >
       <div
