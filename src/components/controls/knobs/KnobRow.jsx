@@ -117,8 +117,8 @@ export function KnobRow({
     }
     return out;
     // return out.sort((a, b) => a.paramName.localeCompare(b.paramName));
-  // }, [mapForBus]);
-    }, [mapForBus, expandedKnobId]);
+    // }, [mapForBus]);
+  }, [mapForBus, expandedKnobId]);
 
   const [localValues, setLocalValues] = React.useState(() => ({}));
   const localValuesRef = React.useRef({});
@@ -550,7 +550,7 @@ export function KnobRow({
         setExpandedKnobId(firstMappedKnob.id);
       }
     }
-  // }, [expanded, hasAnyMappedTargets, collapseExpanded]);
+    // }, [expanded, hasAnyMappedTargets, collapseExpanded]);
   }, [
     expanded,
     expandedKnobId,
@@ -660,56 +660,85 @@ export function KnobRow({
           style={{
             flex: "0 0 auto",
             minHeight: 0,
-            padding: expanded ? "16px 20px" : "0 20px",
+            padding: expanded ? "16px 20px 76px" : "0 20px",
             overflow: "hidden",
             height: expanded ? 600 : 0,
             opacity: expanded ? 1 : 0,
             transition: "height 1000ms ease, opacity 1000ms ease, padding 1000ms ease",
           }}
         >
-          
+          {/* <div style={{ display: "flex", justifyContent: "center", alignItems: "center", marginBottom: 12 }}>
+            <button
+              type="button"
+              onClick={collapseExpanded}
+              style={styles.expandToggleBtn}
+              title="Collapse expanded knob row"
+            >
+              <span style={styles.expandToggleGlyph}>{expanded ? "▾" : ""}</span>
+            </button>
+          </div> */}
+
           <div
             style={{
               height: "100%",
-              display: "grid",
-              gridTemplateRows: "repeat(3, minmax(0, 1fr)) 56px",
-              gap: 12,
+              // display: "grid",
+              // gridTemplateRows: "repeat(3, minmax(0, 1fr)) 56px",
+              // gap: 12,
+              position: "relative",
             }}
           >
-            {Array.from({ length: 3 }).map((_, rowIdx) => {
-              const entry = mappedParamsForExpandedView[rowIdx];
+            <div
+              style={{
+                height: "100%",
+                display: "grid",
+                gridTemplateRows: "repeat(3, minmax(0, 1fr))",
+                gap: 12,
+              }}
+            >
+              {Array.from({ length: 3 }).map((_, rowIdx) => {
+                const entry = mappedParamsForExpandedView[rowIdx];
 
-              return (
-                <div key={`map-row-${rowIdx}`} style={{ minHeight: 0 }}>
-                  {entry ? (
-                    <MapCard
-                      draggableActive={draggingRowIdx === rowIdx}
-                      draggableGhost={draggingRowIdx !== null && draggingRowIdx !== rowIdx}
-                      onDragHoldStart={(evt) => startMapCardDrag(evt, entry, rowIdx)}
-                      onDragHoldMove={updateMapCardDrag}
-                      onDragHoldEnd={endMapCardDrag}
-                      paramName={entry.paramName}
-                      pluginName={entry.pluginName}
-                      value01={readFxParam01(
-                        fxParamSources,
-                        entry.fxGuid,
-                        entry.paramIdx,
-                        0.5
-                      )}
-                      invert={entry.invert === true}
-                      onChange01={(next) => onMappedParamChange(entry, next)}
-                      onToggleInvert={() => onToggleMappedInvert(entry)}
-                      badgeLabel={entry.isPrimary ? "Primary" : ""}
-                      onUnmap={() => onUnmapMappedParam(entry)}
-                      onRange={() => console.log("range", entry)}
-                      onExtra={() => console.log("extra", entry)}
-                    />
-                  ) : null}
-                </div>
-              );
-            })}
-
-            <div style={{ display: "flex", justifyContent: "center", alignItems: "center" }}>
+                return (
+                  <div key={`map-row-${rowIdx}`} style={{ minHeight: 0 }}>
+                    {entry ? (
+                      <MapCard
+                        draggableActive={draggingRowIdx === rowIdx}
+                        draggableGhost={draggingRowIdx !== null && draggingRowIdx !== rowIdx}
+                        onDragHoldStart={(evt) => startMapCardDrag(evt, entry, rowIdx)}
+                        onDragHoldMove={updateMapCardDrag}
+                        onDragHoldEnd={endMapCardDrag}
+                        paramName={entry.paramName}
+                        pluginName={entry.pluginName}
+                        value01={readFxParam01(
+                          fxParamSources,
+                          entry.fxGuid,
+                          entry.paramIdx,
+                          0.5
+                        )}
+                        invert={entry.invert === true}
+                        onChange01={(next) => onMappedParamChange(entry, next)}
+                        onToggleInvert={() => onToggleMappedInvert(entry)}
+                        badgeLabel={entry.isPrimary ? "Primary" : ""}
+                        onUnmap={() => onUnmapMappedParam(entry)}
+                        onRange={() => console.log("range", entry)}
+                        onExtra={() => console.log("extra", entry)}
+                      />
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+            <div
+              style={{
+                position: "absolute",
+                left: 0,
+                right: 0,
+                bottom: 0,
+                display: "flex",
+                justifyContent: "center",
+                pointerEvents: "none",
+              }}
+            >
               <button
                 type="button"
                 onClick={collapseExpanded}
