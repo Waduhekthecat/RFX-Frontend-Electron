@@ -126,6 +126,23 @@ export function PluginView() {
     setDragMappingParam(null);
   }, []);
 
+   React.useEffect(() => {
+    if (!dragMappingParam) return;
+
+    const clearMapDrag = () => {
+      setDragMappingParam(null);
+    };
+
+    window.addEventListener("drop", clearMapDrag, true);
+    window.addEventListener("dragend", clearMapDrag, true);
+
+    return () => {
+      window.removeEventListener("drop", clearMapDrag, true);
+      window.removeEventListener("dragend", clearMapDrag, true);
+    };
+  }, [dragMappingParam]);
+
+  
   const onDropMapToKnob = React.useCallback(
     (knobId, payload) => {
       const busId = String(activeBusId || "");
