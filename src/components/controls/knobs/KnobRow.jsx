@@ -368,6 +368,11 @@ export function KnobRow({
     [getTargetsForKnob]
   );
 
+  const hasAnyMappedTargets = React.useMemo(
+    () => interactiveKnobs.some((knob) => knobHasMappedTarget(knob.id)),
+    [interactiveKnobs, knobHasMappedTarget]
+  );
+
   const onKnobTap = React.useCallback(
     (knobId) => {
       // if (!mappingArmed) return;
@@ -429,6 +434,12 @@ export function KnobRow({
     });
   }, [onExpandedChange]);
 
+  React.useEffect(() => {
+    if (expanded && !hasAnyMappedTargets) {
+      collapseExpanded();
+    }
+  }, [expanded, hasAnyMappedTargets, collapseExpanded]);
+  
   const REVEAL_H = EXPANDED_H - COLLAPSED_H;
 
   return (
