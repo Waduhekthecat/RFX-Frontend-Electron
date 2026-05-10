@@ -71,9 +71,11 @@ export function PluginView() {
   const fxParamsOverlayByGuid = useRfxStore(
     (s) => s.ops?.overlay?.fxParamsByGuid || EMPTY_OBJ
   );
+
   const fxParamsByGuidEntities = useRfxStore(
     (s) => s.entities?.fxParamsByGuid || EMPTY_OBJ
   );
+
   const fxParamsByGuidSnapshot = useRfxStore(
     (s) => s.snapshot?.fxParamsByGuid || EMPTY_OBJ
   );
@@ -106,77 +108,53 @@ export function PluginView() {
 
   const pluginName = String(manifest?.plugin?.fxName || fx?.name || "Plugin");
 
-  const [mapModalOpen, setMapModalOpen] = React.useState(false);
   const [mapParam, setMapParam] = React.useState(null);
   const [mapInverse, setMapInverse] = React.useState(false);
 
   const [dragMappingParam, setDragMappingParam] = React.useState(null);
-
-  // Separate visual glow state from actual drag payload state.
-  // This lets the knobs stop glowing immediately on release,
-  // even if the browser still plays the invalid-drop snap-back animation.
   const [mapDragGlowActive, setMapDragGlowActive] = React.useState(false);
 
   const [knobRowExpanded, setKnobRowExpanded] = React.useState(false);
+
+  const bottomBusId = String(activeBusId || "NONE");
 
   const onMapDragStart = React.useCallback((p) => {
     if (!p) return;
 
     const idx = Number(p.idx);
     if (!Number.isFinite(idx)) return;
-    setMapDragGlowActive(true);
+
     setDragMappingParam(p);
+    setMapDragGlowActive(true);
   }, []);
 
   const onMapDragEnd = React.useCallback(() => {
     setMapDragGlowActive(false);
-    // Let any drop handler finish reading dragMappingParam first.
-    requestAnimationFrame(() => {
-      setDragMappingParam(null);
-    });
+    setDragMappingParam(null);
   }, []);
 
   React.useEffect(() => {
-    if (!mapDragGlowActive) return;
-    const stopGlow = () => {
+    if (!dragMappingParam && !mapDragGlowActive) return;
+
+    const clearDragState = () => {
       setMapDragGlowActive(false);
+      setDragMappingParam(null);
     };
 
-    window.addEventListener("pointerup", stopGlow, true);
-    window.addEventListener("mouseup", stopGlow, true);
-    window.addEventListener("touchend", stopGlow, true);
-    window.addEventListener("drop", stopGlow, true);
+    window.addEventListener("drop", clearDragState, true);
+    window.addEventListener("dragend", clearDragState, true);
 
     return () => {
-      window.removeEventListener("pointerup", stopGlow, true);
-      window.removeEventListener("mouseup", stopGlow, true);
-      window.removeEventListener("touchend", stopGlow, true);
-      window.removeEventListener("drop", stopGlow, true);
+      window.removeEventListener("drop", clearDragState, true);
+      window.removeEventListener("dragend", clearDragState, true);
     };
-  }, [mapDragGlowActive]);
-
-  React.useEffect(() => {
-    if (!dragMappingParam) return;
-
-    const clearPayloadSoon = () => {
-      requestAnimationFrame(() => {
-        setDragMappingParam(null);
-      });
-    };
-
-    window.addEventListener("dragend", clearPayloadSoon, true);
-    window.addEventListener("drop", clearPayloadSoon, true);
-
-    return () => {
-      window.removeEventListener("dragend", clearPayloadSoon, true);
-      window.removeEventListener("drop", clearPayloadSoon, true);
-    };
-  }, [dragMappingParam]);
+  }, [dragMappingParam, mapDragGlowActive]);
 
   const onDropMapToKnob = React.useCallback(
     (knobId, payload) => {
       const busId = String(activeBusId || "");
       if (!busId || !knobId) return;
+
       setMapDragGlowActive(false);
 
       let idx = Number(dragMappingParam?.idx);
@@ -302,7 +280,6 @@ export function PluginView() {
     if (!p) return;
 
     setMapParam(p);
-    setMapModalOpen(true);
     setMapInverse(false);
   }, []);
 
@@ -317,8 +294,6 @@ export function PluginView() {
     },
     [activeBusId, unmapParamFromBus, fxGuid]
   );
-
-  const bottomBusId = String(activeBusId || "NONE");
 
   const mappedParamsForExpandedView = React.useMemo(() => {
     const busId = bottomBusId;
