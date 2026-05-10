@@ -118,7 +118,8 @@ export function Knob({
   const v = clamp01(displayValue);
   const frameIndex = valueToFrame(v, SPRITE_FRAMES);
 
-  function finishDrag(el, pointerId) {
+  // function finishDrag(el, pointerId) {
+  function finishInteraction(el, pointerId, { commit = true } = {}) {
     setDragging(false);
     startRef.current = null;
     setGlobalDragLock(false);
@@ -129,7 +130,8 @@ export function Knob({
       void err;
     }
 
-    onCommit?.();
+    // onCommit?.();
+    if (commit) onCommit?.();
   }
 
   function clearLongPressTimer() {
@@ -217,18 +219,29 @@ export function Knob({
     if (!interactive) return;
     clearLongPressTimer();
     setPressing(false);
+    const pendingPress = pendingPressRef.current;
     pendingPressRef.current = null;
     if (longPressFiredRef.current) {
       longPressFiredRef.current = false;
-      finishDrag(e.currentTarget, startRef.current?.pointerId ?? e.pointerId);
+      // finishDrag(e.currentTarget, startRef.current?.pointerId ?? e.pointerId);
+      finishInteraction(e.currentTarget, startRef.current?.pointerId ?? e.pointerId);
       return;
     }
-    finishDrag(e.currentTarget, startRef.current?.pointerId ?? e.pointerId);
+
+    if (!startRef.current) {
+      finishInteraction(e.currentTarget, pendingPress?.pointerId ?? e.pointerId, {
+        commit: false,
+      });
+      return;
+    }
+    // finishDrag(e.currentTarget, startRef.current?.pointerId ?? e.pointerId);
+    finishInteraction(e.currentTarget, startRef.current?.pointerId ?? e.pointerId);
   }
 
   function onPointerCancel(e) {
     if (!interactive) return;
-    finishDrag(e.currentTarget, startRef.current?.pointerId ?? e.pointerId);
+    // finishDrag(e.currentTarget, startRef.current?.pointerId ?? e.pointerId);
+    finishInteraction(e.currentTarget, startRef.current?.pointerId ?? e.pointerId);
   }
 
   function onLostPointerCapture(e) {
@@ -237,7 +250,8 @@ export function Knob({
       clearLongPressTimer();
       pendingPressRef.current = null;
       longPressFiredRef.current = false;
-      finishDrag(e.currentTarget, startRef.current?.pointerId ?? e.pointerId);
+      // finishDrag(e.currentTarget, startRef.current?.pointerId ?? e.pointerId);
+      finishInteraction(e.currentTarget, startRef.current?.pointerId ?? e.pointerId);
     }
   }
 
