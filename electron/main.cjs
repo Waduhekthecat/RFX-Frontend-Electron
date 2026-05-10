@@ -212,8 +212,12 @@ function createWindow() {
   const targetDisplay = chooseTargetDisplay();
   // const { x, y, width, height } = targetDisplay.bounds;
   const { x, y, width: displayWidth, height: displayHeight } = targetDisplay.workArea;
-  const width = Math.min(1600, displayWidth);
-  const height = Math.min(900, displayHeight);
+  // const width = Math.min(1600, displayWidth);
+  // const height = Math.min(900, displayHeight);
+  const APP_WIDTH = 1280;
+  const APP_HEIGHT = 800;
+  const width = Math.min(APP_WIDTH, displayWidth);
+  const height = Math.min(APP_HEIGHT, displayHeight);
   const windowX = x + Math.floor((displayWidth - width) / 2);
   const windowY = y + Math.floor((displayHeight - height) / 2);
 

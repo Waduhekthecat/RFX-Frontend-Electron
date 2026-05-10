@@ -324,7 +324,8 @@ export function PluginView() {
     const knobId = `${busId}_k${i + 1}`;
     const target = getPrimaryKnobTarget(maps[knobId]);
 
-    const base01 = Number.isFinite(values[knobId]) ? values[knobId] : 0.5;
+    // const base01 = Number.isFinite(values[knobId]) ? values[knobId] : 0.5;
+    const base01 = target ? (Number.isFinite(values[knobId]) ? values[knobId] : 0.5) : 0.5;
 
     const param01 =
       target?.fxGuid && Number.isFinite(Number(target?.paramIdx))
