@@ -50,7 +50,7 @@ export function KnobRow({
   onExpandedChange,
 }) {
   const [expanded, setExpanded] = React.useState(false);
-    const [expandedKnobId, setExpandedKnobId] = React.useState(null);
+  const [expandedKnobId, setExpandedKnobId] = React.useState(null);
 
   const dispatchIntent = useRfxStore((s) => s.dispatchIntent);
   const setKnobValueLocal = useRfxStore((s) => s.setKnobValueLocal);
@@ -486,6 +486,7 @@ export function KnobRow({
                 // onLongPress={onKnobLongPressExpand}
                 onLongPress={() => onKnobLongPressExpand(k.id)}
                 interactive={mappingArmed || knobHasMappedTarget(k.id)}
+                dimmed={expanded && expandedKnobId !== k.id}
               />
             ))}
 
