@@ -366,15 +366,26 @@ export function KnobRow({
   );
 
   // const onKnobLongPressExpand = React.useCallback(() => {
-    const onKnobLongPressExpand = React.useCallback((knobId) => {
-    setExpandedKnobId(knobId);
-    setExpanded((prev) => {
-      if (prev) return prev;
-      onExpandedChange?.(true);
-      return true;
-    });
-    setExpandedKnobId(null);
-  }, [onExpandedChange]);
+  //   const onKnobLongPressExpand = React.useCallback((knobId) => {
+  //   setExpandedKnobId(knobId);
+  //   setExpanded((prev) => {
+  //     if (prev) return prev;
+  //     onExpandedChange?.(true);
+  //     return true;
+  //   });
+  //   setExpandedKnobId(null);
+  // }, [onExpandedChange]);
+  const onKnobLongPressExpand = React.useCallback(
+    (knobId) => {
+      setExpandedKnobId(knobId);
+      setExpanded((prev) => {
+        if (prev) return prev;
+        onExpandedChange?.(true);
+        return true;
+      });
+    },
+    [onExpandedChange]
+  );
 
   const knobHasMappedTarget = React.useCallback(
     (knobId) => getTargetsForKnob(knobId).length > 0,
@@ -392,6 +403,7 @@ export function KnobRow({
   );
 
   const collapseExpanded = React.useCallback(() => {
+    setExpandedKnobId(null);
     setExpanded((prev) => {
       if (!prev) return prev;
       onExpandedChange?.(false);
