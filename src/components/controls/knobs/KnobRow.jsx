@@ -742,7 +742,7 @@ export function KnobRow({
               <button
                 type="button"
                 onClick={collapseExpanded}
-                style={styles.expandToggleBtn}
+                style={{ ...styles.expandToggleBtn, pointerEvents: "auto" }}
                 title="Collapse expanded knob row"
               >
                 <span style={styles.expandToggleGlyph}>{expanded ? "▾" : ""}</span>
