@@ -684,7 +684,8 @@ export function KnobRow({
               // display: "grid",
               // gridTemplateRows: "repeat(3, minmax(0, 1fr)) 56px",
               // gap: 12,
-              position: "relative",
+              display: "grid",
+              gridTemplateRows: "minmax(0, 1fr) 64px",
             }}
           >
             <div
@@ -693,7 +694,7 @@ export function KnobRow({
                 display: "grid",
                 gridTemplateRows: "repeat(3, minmax(0, 1fr))",
                 gap: 12,
-                paddingBottom: 64,
+                // paddingBottom: 64,
                 boxSizing: "border-box",
               }}
             >
@@ -732,11 +733,12 @@ export function KnobRow({
             </div>
             <div
               style={{
-                position: "absolute",
-                left: 0,
-                right: 0,
-                bottom: 0,
+                // position: "absolute",
+                // left: 0,
+                // right: 0,
+                // bottom: 0,
                 display: "flex",
+                alignItems: "center",
                 justifyContent: "center",
                 pointerEvents: "none",
               }}
