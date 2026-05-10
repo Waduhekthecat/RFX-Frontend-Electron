@@ -506,6 +506,7 @@ export function KnobRow({
                   mappingArmed ||
                   (knobHasMappedTarget(k.id) && (!expanded || expandedKnobId === k.id))
                 }
+                tapEnabled={expanded && expandedKnobId !== k.id && knobHasMappedTarget(k.id)}
                 dimmed={expanded && expandedKnobId !== k.id}
                 yOffset={expanded ? (expandedKnobId === k.id ? -5 : 5) : 0}
               />

@@ -44,6 +44,7 @@ export function Knob({
   interactive = true,
   dimmed = false,
   yOffset = 0,
+  tapEnabled = false,
 }) {
   const [dragging, setDragging] = React.useState(false);
   const startRef = React.useRef(null);
@@ -156,11 +157,11 @@ export function Knob({
   }
 
   function onPointerDown(e) {
-    if (!interactive) return;
+    if (!interactive && !tapEnabled) return;
     e.preventDefault();
     e.stopPropagation();
 
-    if (mappingArmed) {
+    if (mappingArmed || !interactive) {
       onTap?.(id);
       return;
     }
@@ -231,6 +232,7 @@ export function Knob({
     }
 
     if (!startRef.current) {
+      onTap?.(id);
       finishInteraction(e.currentTarget, pendingPress?.pointerId ?? e.pointerId, {
         commit: false,
       });
