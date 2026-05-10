@@ -210,7 +210,12 @@ function chooseTargetDisplay() {
 function createWindow() {
   const preloadPath = path.join(__dirname, "preload.cjs");
   const targetDisplay = chooseTargetDisplay();
-  const { x, y, width, height } = targetDisplay.bounds;
+  // const { x, y, width, height } = targetDisplay.bounds;
+  const { x, y, width: displayWidth, height: displayHeight } = targetDisplay.workArea;
+  const width = Math.min(1600, displayWidth);
+  const height = Math.min(900, displayHeight);
+  const windowX = x + Math.floor((displayWidth - width) / 2);
+  const windowY = y + Math.floor((displayHeight - height) / 2);
 
   console.log("PRELOAD PATH =", preloadPath);
   console.log("[RFX] target display =", {
@@ -223,19 +228,22 @@ function createWindow() {
   });
 
   mainWindow = new BrowserWindow({
-    x, y, width, height,
+    // x, y, width, height,
+    x: windowX,
+    y: windowY,
+    width,
+    height,
     show: false,
     backgroundColor: "#000000",
-    frame: false,
-    fullscreen: true,
-    // kiosk: true,
+    frame: true,
+    fullscreen: false,
     kiosk: false,
     autoHideMenuBar: true,
-    movable: false,
-    minimizable: false,
-    maximizable: false,
+    movable: true,
+    minimizable: true,
+    maximizable: true,
     closable: true,
-    resizable: IS_DEV,
+    resizable: true,
     useContentSize: false,
     roundedCorners: false,
     titleBarStyle: "hidden",
@@ -249,7 +257,7 @@ function createWindow() {
   });
 
   mainWindow.setMenuBarVisibility(false);
-  mainWindow.setFullScreen(true);
+  mainWindow.setFullScreen(false);
 
   if (!IS_DEV) {
     // mainWindow.setKiosk(true);
@@ -260,9 +268,11 @@ function createWindow() {
 
   mainWindow.once("ready-to-show", () => {
     if (!mainWindow || mainWindow.isDestroyed()) return;
-    mainWindow.setBounds({ x, y, width, height });
-    mainWindow.setFullScreen(true);
+    // mainWindow.setBounds({ x, y, width, height });
+    // mainWindow.setFullScreen(true);
     // if (!IS_DEV) mainWindow.setKiosk(true);
+    mainWindow.setBounds({ x: windowX, y: windowY, width, height });
+    mainWindow.setFullScreen(false);
     mainWindow.show();
     mainWindow.focus();
   });
