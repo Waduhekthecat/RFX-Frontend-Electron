@@ -101,17 +101,19 @@ export function KnobRow({
 
         out.push({
           knobId,
+          targetOrder: out.length,
           trackGuid: t.trackGuid,
           fxGuid: String(t.fxGuid),
           paramIdx: Number(t.paramIdx),
           paramName: String(t.paramName || `Param ${Number(t.paramIdx)}`),
           pluginName: String(t.fxName || "Plugin"),
           invert: t.invert === true,
+          isPrimary: targets.indexOf(t) === 0,
         });
       }
     }
-
-    return out.sort((a, b) => a.paramName.localeCompare(b.paramName));
+    return out;
+    // return out.sort((a, b) => a.paramName.localeCompare(b.paramName));
   // }, [mapForBus]);
     }, [mapForBus, expandedKnobId]);
 
@@ -560,6 +562,7 @@ export function KnobRow({
                       invert={entry.invert === true}
                       onChange01={(next) => onMappedParamChange(entry, next)}
                       onToggleInvert={() => onToggleMappedInvert(entry)}
+                      badgeLabel={entry.isPrimary ? "Primary" : ""}
                       onUnmap={() => onUnmapMappedParam(entry)}
                       onRange={() => console.log("range", entry)}
                       onExtra={() => console.log("extra", entry)}
