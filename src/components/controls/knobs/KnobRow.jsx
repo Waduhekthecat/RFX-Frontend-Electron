@@ -693,6 +693,8 @@ export function KnobRow({
                 display: "grid",
                 gridTemplateRows: "repeat(3, minmax(0, 1fr))",
                 gap: 12,
+                paddingBottom: 64,
+                boxSizing: "border-box",
               }}
             >
               {Array.from({ length: 3 }).map((_, rowIdx) => {
