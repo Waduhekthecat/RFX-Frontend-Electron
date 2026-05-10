@@ -7,7 +7,6 @@ import { useIntent } from "../../../core/useIntent";
 import { useRfxStore } from "../../../core/rfx/Store";
 import { ParamCard } from "./components/ParamCard";
 import { KnobRow } from "../../../components/controls/knobs/KnobRow";
-// import { MapCard } from "../../../components/ui/MapCard";
 
 const EMPTY = Object.freeze({});
 const EMPTY_ARR = Object.freeze([]);
@@ -35,6 +34,7 @@ function readFxParam01(sources, fxGuid, paramIdx, fallback01 = 0.5) {
 
   const manifest = entitiesByGuid?.[fxGuid] ?? snapshotByGuid?.[fxGuid];
   const params = manifest?.params;
+
   if (Array.isArray(params)) {
     for (let i = 0; i < params.length; i += 1) {
       const x = params[i];
@@ -68,9 +68,15 @@ export function PluginView() {
   const commitKnobMapping = useRfxStore((s) => s.commitKnobMapping);
   const unmapParamFromBus = useRfxStore((s) => s.unmapParamFromBus);
 
-  const fxParamsOverlayByGuid = useRfxStore((s) => s.ops?.overlay?.fxParamsByGuid || EMPTY_OBJ);
-  const fxParamsByGuidEntities = useRfxStore((s) => s.entities?.fxParamsByGuid || EMPTY_OBJ);
-  const fxParamsByGuidSnapshot = useRfxStore((s) => s.snapshot?.fxParamsByGuid || EMPTY_OBJ);
+  const fxParamsOverlayByGuid = useRfxStore(
+    (s) => s.ops?.overlay?.fxParamsByGuid || EMPTY_OBJ
+  );
+  const fxParamsByGuidEntities = useRfxStore(
+    (s) => s.entities?.fxParamsByGuid || EMPTY_OBJ
+  );
+  const fxParamsByGuidSnapshot = useRfxStore(
+    (s) => s.snapshot?.fxParamsByGuid || EMPTY_OBJ
+  );
 
   const fxParamSources = React.useMemo(
     () => ({
@@ -105,59 +111,89 @@ export function PluginView() {
   const [mapInverse, setMapInverse] = React.useState(false);
 
   const [dragMappingParam, setDragMappingParam] = React.useState(null);
-  const [knobRowExpanded, setKnobRowExpanded] = React.useState(false);
 
-  const handleToggleExpand = () => {
-    setKnobRowExpanded((prev) => {
-      const next = !prev;
-      console.log("knobRowExpanded:", next);
-      return next;
-    });
-  };
+  // Separate visual glow state from actual drag payload state.
+  // This lets the knobs stop glowing immediately on release,
+  // even if the browser still plays the invalid-drop snap-back animation.
+  const [mapDragGlowActive, setMapDragGlowActive] = React.useState(false);
+
+  const [knobRowExpanded, setKnobRowExpanded] = React.useState(false);
 
   const onMapDragStart = React.useCallback((p) => {
     if (!p) return;
+
     const idx = Number(p.idx);
     if (!Number.isFinite(idx)) return;
+    setMapDragGlowActive(true);
     setDragMappingParam(p);
   }, []);
 
   const onMapDragEnd = React.useCallback(() => {
-    setDragMappingParam(null);
+    setMapDragGlowActive(false);
+    // Let any drop handler finish reading dragMappingParam first.
+    requestAnimationFrame(() => {
+      setDragMappingParam(null);
+    });
   }, []);
 
-   React.useEffect(() => {
-    if (!dragMappingParam) return;
-
-    const clearMapDrag = () => {
-      setDragMappingParam(null);
+  React.useEffect(() => {
+    if (!mapDragGlowActive) return;
+    const stopGlow = () => {
+      setMapDragGlowActive(false);
     };
 
-    window.addEventListener("drop", clearMapDrag, true);
-    window.addEventListener("dragend", clearMapDrag, true);
+    window.addEventListener("pointerup", stopGlow, true);
+    window.addEventListener("mouseup", stopGlow, true);
+    window.addEventListener("touchend", stopGlow, true);
+    window.addEventListener("drop", stopGlow, true);
 
     return () => {
-      window.removeEventListener("drop", clearMapDrag, true);
-      window.removeEventListener("dragend", clearMapDrag, true);
+      window.removeEventListener("pointerup", stopGlow, true);
+      window.removeEventListener("mouseup", stopGlow, true);
+      window.removeEventListener("touchend", stopGlow, true);
+      window.removeEventListener("drop", stopGlow, true);
+    };
+  }, [mapDragGlowActive]);
+
+  React.useEffect(() => {
+    if (!dragMappingParam) return;
+
+    const clearPayloadSoon = () => {
+      requestAnimationFrame(() => {
+        setDragMappingParam(null);
+      });
+    };
+
+    window.addEventListener("dragend", clearPayloadSoon, true);
+    window.addEventListener("drop", clearPayloadSoon, true);
+
+    return () => {
+      window.removeEventListener("dragend", clearPayloadSoon, true);
+      window.removeEventListener("drop", clearPayloadSoon, true);
     };
   }, [dragMappingParam]);
 
-  
   const onDropMapToKnob = React.useCallback(
     (knobId, payload) => {
       const busId = String(activeBusId || "");
       if (!busId || !knobId) return;
+      setMapDragGlowActive(false);
 
       let idx = Number(dragMappingParam?.idx);
+
       if (!Number.isFinite(idx)) {
         const m = String(payload || "").match(/^map:([^:]+):(\d+)$/);
         if (!m) return;
         if (String(m[1]) !== String(fxGuid)) return;
         idx = Number(m[2]);
       }
+
       if (!Number.isFinite(idx)) return;
 
-      const src = dragMappingParam || params.find((x) => Number(x?.idx) === idx) || null;
+      const src =
+        dragMappingParam ||
+        params.find((x) => Number(x?.idx) === idx) ||
+        null;
 
       commitKnobMapping?.({
         busId,
@@ -174,7 +210,15 @@ export function PluginView() {
 
       setDragMappingParam(null);
     },
-    [activeBusId, dragMappingParam, fxGuid, params, commitKnobMapping, trackGuid, pluginName]
+    [
+      activeBusId,
+      dragMappingParam,
+      fxGuid,
+      params,
+      commitKnobMapping,
+      trackGuid,
+      pluginName,
+    ]
   );
 
   const mappedKnobsByParamIdx = React.useMemo(() => {
@@ -184,12 +228,6 @@ export function PluginView() {
     const maps = knobMapByBusId?.[busId] || EMPTY_OBJ;
     const out = {};
 
-    // for (const [knobId, t] of Object.entries(maps)) {
-    //   if (!t) continue;
-    //   if (String(t.fxGuid) !== String(fxGuid)) continue;
-
-    //   const idx = Number(t.paramIdx);
-    //   if (!Number.isFinite(idx)) continue;
     for (const [knobId, rawTarget] of Object.entries(maps)) {
       const targets = normalizeKnobTargets(rawTarget);
       if (!targets.length) continue;
@@ -198,16 +236,18 @@ export function PluginView() {
       const n = m ? Number(m[1]) : null;
       const label = n ? `K${n}` : knobId;
 
-      // (out[idx] ||= []).push(label);
       for (const t of targets) {
         if (String(t?.fxGuid) !== String(fxGuid)) continue;
+
         const idx = Number(t?.paramIdx);
         if (!Number.isFinite(idx)) continue;
+
         (out[idx] ||= []).push(label);
       }
     }
 
     for (const k of Object.keys(out)) out[k].sort();
+
     return out;
   }, [activeBusId, knobMapByBusId, fxGuid]);
 
@@ -221,6 +261,7 @@ export function PluginView() {
   const onParamScrub = React.useCallback(
     (p, next01, gestureId) => {
       if (!p) return;
+
       const idx = Number(p.idx);
       if (!Number.isFinite(idx)) return;
 
@@ -240,6 +281,7 @@ export function PluginView() {
   const onParamCommit = React.useCallback(
     (p, final01, gestureId) => {
       if (!p) return;
+
       const idx = Number(p.idx);
       if (!Number.isFinite(idx)) return;
 
@@ -258,6 +300,7 @@ export function PluginView() {
 
   const onMap = React.useCallback((p) => {
     if (!p) return;
+
     setMapParam(p);
     setMapModalOpen(true);
     setMapInverse(false);
@@ -267,6 +310,7 @@ export function PluginView() {
     (p) => {
       const busId = String(activeBusId || "");
       const idx = Number(p?.idx);
+
       if (!busId || !Number.isFinite(idx)) return;
 
       unmapParamFromBus?.({ busId, fxGuid, paramIdx: idx });
@@ -274,12 +318,7 @@ export function PluginView() {
     [activeBusId, unmapParamFromBus, fxGuid]
   );
 
-  const modalBusId = String(activeBusId || "");
-  const modalParamIdx = Number(mapParam?.idx);
-  const modalHasIdx = Number.isFinite(modalParamIdx);
-
   const bottomBusId = String(activeBusId || "NONE");
-
 
   const mappedParamsForExpandedView = React.useMemo(() => {
     const busId = bottomBusId;
@@ -288,8 +327,10 @@ export function PluginView() {
 
     for (const rawTarget of Object.values(maps)) {
       const targets = normalizeKnobTargets(rawTarget);
+
       for (const t of targets) {
         if (!t?.fxGuid || !Number.isFinite(Number(t?.paramIdx))) continue;
+
         out.push({
           trackGuid: t.trackGuid,
           fxGuid: String(t.fxGuid),
@@ -306,6 +347,7 @@ export function PluginView() {
   const onMappedParamChange = React.useCallback(
     (entry, next01) => {
       if (!entry?.fxGuid || !Number.isFinite(Number(entry?.paramIdx))) return;
+
       const value01 = clamp01(next01);
       const gestureId = `mapCard:${bottomBusId}:${entry.fxGuid}:${entry.paramIdx}`;
 
@@ -333,47 +375,50 @@ export function PluginView() {
   );
 
   const bottomKnobs = React.useMemo(() => {
-  const busId = bottomBusId;
-  const values = knobValuesByBusId?.[busId] || EMPTY_OBJ;
-  const maps = knobMapByBusId?.[busId] || EMPTY_OBJ;
+    const busId = bottomBusId;
+    const values = knobValuesByBusId?.[busId] || EMPTY_OBJ;
+    const maps = knobMapByBusId?.[busId] || EMPTY_OBJ;
 
-  return Array.from({ length: 7 }).map((_, i) => {
-    const knobId = `${busId}_k${i + 1}`;
-    const target = getPrimaryKnobTarget(maps[knobId]);
+    return Array.from({ length: 7 }).map((_, i) => {
+      const knobId = `${busId}_k${i + 1}`;
+      const target = getPrimaryKnobTarget(maps[knobId]);
 
-    // const base01 = Number.isFinite(values[knobId]) ? values[knobId] : 0.5;
-    const base01 = target ? (Number.isFinite(values[knobId]) ? values[knobId] : 0.5) : 0.5;
+      const base01 = target
+        ? Number.isFinite(values[knobId])
+          ? values[knobId]
+          : 0.5
+        : 0.5;
 
-    const param01 =
-      target?.fxGuid && Number.isFinite(Number(target?.paramIdx))
-        ? readFxParam01(
-            fxParamSources,
-            String(target.fxGuid),
-            Number(target.paramIdx),
-            base01
-          )
-        : null;
+      const param01 =
+        target?.fxGuid && Number.isFinite(Number(target?.paramIdx))
+          ? readFxParam01(
+              fxParamSources,
+              String(target.fxGuid),
+              Number(target.paramIdx),
+              base01
+            )
+          : null;
 
-    const display01 =
-      param01 !== null
-        ? target?.invert === true
-          ? clamp01(1 - param01)
-          : clamp01(param01)
-        : clamp01(base01);
+      const display01 =
+        param01 !== null
+          ? target?.invert === true
+            ? clamp01(1 - param01)
+            : clamp01(param01)
+          : clamp01(base01);
 
-    const mappedLabel = target
-      ? `${target.fxName || "FX"} • ${target.paramName || `#${target.paramIdx}`}`
-      : "";
+      const mappedLabel = target
+        ? `${target.fxName || "FX"} • ${target.paramName || `#${target.paramIdx}`}`
+        : "";
 
-    return {
-      id: knobId,
-      label: target?.paramName ? String(target.paramName) : `K${i + 1}`,
-      value: display01,
-      mapped: !!target,
-      mappedLabel,
-    };
-  });
-}, [bottomBusId, knobValuesByBusId, knobMapByBusId, fxParamSources]);
+      return {
+        id: knobId,
+        label: target?.paramName ? String(target.paramName) : `K${i + 1}`,
+        value: display01,
+        mapped: !!target,
+        mappedLabel,
+      };
+    });
+  }, [bottomBusId, knobValuesByBusId, knobMapByBusId, fxParamSources]);
 
   return (
     <div className={styles.Root}>
@@ -381,7 +426,12 @@ export function PluginView() {
         <Panel className={styles.panelHeader}>
           <div className={styles.Header}>
             <div className={styles.Title}>{pluginName}</div>
-            <button type="button" onClick={() => nav("/edit")} className={styles.BackButton}>
+
+            <button
+              type="button"
+              onClick={() => nav("/edit")}
+              className={styles.BackButton}
+            >
               BACK
             </button>
           </div>
@@ -438,7 +488,7 @@ export function PluginView() {
             knobMapByBusId={knobMapByBusId}
             mappingArmed={mappingArmed}
             onDropMap={onDropMapToKnob}
-            mapDragActive={!!dragMappingParam}
+            mapDragActive={mapDragGlowActive}
             onExpandedChange={setKnobRowExpanded}
           />
         </div>

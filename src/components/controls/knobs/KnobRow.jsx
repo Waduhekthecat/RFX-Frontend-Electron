@@ -435,11 +435,30 @@ export function KnobRow({
   }, [onExpandedChange]);
 
   React.useEffect(() => {
-    if (expanded && !hasAnyMappedTargets) {
+    // if (expanded && !hasAnyMappedTargets) {
+    if (!expanded) return;
+
+    if (!hasAnyMappedTargets) {
       collapseExpanded();
+      return;
     }
-  }, [expanded, hasAnyMappedTargets, collapseExpanded]);
-  
+
+    if (!expandedKnobId || !knobHasMappedTarget(expandedKnobId)) {
+      const firstMappedKnob = interactiveKnobs.find((knob) => knobHasMappedTarget(knob.id));
+      if (firstMappedKnob && firstMappedKnob.id !== expandedKnobId) {
+        setExpandedKnobId(firstMappedKnob.id);
+      }
+    }
+  // }, [expanded, hasAnyMappedTargets, collapseExpanded]);
+  }, [
+    expanded,
+    expandedKnobId,
+    hasAnyMappedTargets,
+    interactiveKnobs,
+    knobHasMappedTarget,
+    collapseExpanded,
+  ]);
+
   const REVEAL_H = EXPANDED_H - COLLAPSED_H;
 
   return (
