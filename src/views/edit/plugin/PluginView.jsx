@@ -118,6 +118,11 @@ export function PluginView() {
 
   const bottomBusId = String(activeBusId || "NONE");
 
+  const clearMapDragState = React.useCallback(() => {
+    setMapDragGlowActive(false);
+    setDragMappingParam(null);
+  }, []);
+
   const onMapDragStart = React.useCallback((p) => {
     if (!p) return;
 
@@ -129,16 +134,39 @@ export function PluginView() {
   }, []);
 
   const onMapDragEnd = React.useCallback(() => {
-    setMapDragGlowActive(false);
-    setDragMappingParam(null);
-  }, []);
+    clearMapDragState();
+  }, [clearMapDragState]);
+
+  const onRootDragOver = React.useCallback(
+    (e) => {
+      if (!mapDragGlowActive && !dragMappingParam) return;
+
+      e.preventDefault();
+
+      if (e.dataTransfer) {
+        e.dataTransfer.dropEffect = "copy";
+      }
+    },
+    [mapDragGlowActive, dragMappingParam]
+  );
+
+  const onRootDrop = React.useCallback(
+    (e) => {
+      if (!mapDragGlowActive && !dragMappingParam) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      clearMapDragState();
+    },
+    [mapDragGlowActive, dragMappingParam, clearMapDragState]
+  );
 
   React.useEffect(() => {
     if (!dragMappingParam && !mapDragGlowActive) return;
 
     const clearDragState = () => {
-      setMapDragGlowActive(false);
-      setDragMappingParam(null);
+      clearMapDragState();
     };
 
     window.addEventListener("drop", clearDragState, true);
@@ -148,7 +176,7 @@ export function PluginView() {
       window.removeEventListener("drop", clearDragState, true);
       window.removeEventListener("dragend", clearDragState, true);
     };
-  }, [dragMappingParam, mapDragGlowActive]);
+  }, [dragMappingParam, mapDragGlowActive, clearMapDragState]);
 
   const onDropMapToKnob = React.useCallback(
     (knobId, payload) => {
@@ -396,7 +424,11 @@ export function PluginView() {
   }, [bottomBusId, knobValuesByBusId, knobMapByBusId, fxParamSources]);
 
   return (
-    <div className={styles.Root}>
+    <div
+      className={styles.Root}
+      onDragOver={onRootDragOver}
+      onDrop={onRootDrop}
+    >
       <div className={styles.Column}>
         <Panel className={styles.panelHeader}>
           <div className={styles.Header}>

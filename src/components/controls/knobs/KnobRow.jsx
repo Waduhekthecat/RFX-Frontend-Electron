@@ -611,7 +611,7 @@ export function KnobRow({
         >
           <div
             style={{
-              ...styles.rowGrid(7),
+              ...styles.rowGrid(6),
               height: "100%",
               background: "transparent",
               boxShadow: "none",
@@ -645,14 +645,14 @@ export function KnobRow({
               />
             ))}
 
-            <button
+            {/* <button
               type="button"
               onClick={collapseExpanded}
               style={styles.expandToggleBtn}
               title="Collapse expanded knob row"
             >
               <span style={styles.expandToggleGlyph}>{expanded ? "▾" : ""}</span>
-            </button>
+            </button> */}
           </div>
         </div>
 
@@ -667,6 +667,24 @@ export function KnobRow({
             transition: "height 1000ms ease, opacity 1000ms ease, padding 1000ms ease",
           }}
         >
+          {expanded ? (
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "center",
+                paddingBottom: 8,
+              }}
+            >
+              <button
+                type="button"
+                onClick={collapseExpanded}
+                style={styles.expandToggleBtn}
+                title="Collapse expanded knob row"
+              >
+                <span style={styles.expandToggleGlyph}>▾</span>
+              </button>
+            </div>
+          ) : null}
           <div
             style={{
               height: "100%",
@@ -675,12 +693,12 @@ export function KnobRow({
               gap: 12,
             }}
           >
-            {Array.from({ length: 4 }).map((_, rowIdx) => {
+            {Array.from({ length: 3 }).map((_, rowIdx) => {
               const entry = mappedParamsForExpandedView[rowIdx];
 
               return (
                 <div key={`map-row-${rowIdx}`} style={{ minHeight: 0 }}>
-                  {rowIdx < 3 && entry ? (
+                  {entry ? (
                     <MapCard
                       draggableActive={draggingRowIdx === rowIdx}
                       draggableGhost={draggingRowIdx !== null && draggingRowIdx !== rowIdx}
@@ -707,6 +725,17 @@ export function KnobRow({
                 </div>
               );
             })}
+
+            <div style={{ display: "flex", justifyContent: "center", alignItems: "center" }}>
+              <button
+                type="button"
+                onClick={collapseExpanded}
+                style={styles.expandToggleBtn}
+                title="Collapse expanded knob row"
+              >
+                <span style={styles.expandToggleGlyph}>{expanded ? "▾" : ""}</span>
+              </button>
+            </div>
           </div>
         </div>
       </Panel></div>
