@@ -150,6 +150,8 @@ export function KnobRow({
 
   const onKnobChange = React.useCallback(
     (knobId, next01) => {
+      if (expanded && expandedKnobId !== knobId) return;
+
       const v01 = clamp01(next01);
 
       const prevKnob = clamp01(
@@ -248,11 +250,13 @@ export function KnobRow({
 
       groupedGestureStateRef.current[knobId] = { valuesByTargetKey };
     },
-    [busKey, dispatchIntent, getTargetsForKnob, setKnobValueLocal, fxParamSources]
+    [busKey, dispatchIntent, expanded, expandedKnobId, getTargetsForKnob, setKnobValueLocal, fxParamSources]
   );
 
   const onKnobCommit = React.useCallback(
     (knobId) => {
+      if (expanded && expandedKnobId !== knobId) return;
+
       activeLocalKnobsRef.current.delete(knobId);
 
       const targets = getTargetsForKnob(knobId);
@@ -285,7 +289,7 @@ export function KnobRow({
 
       delete groupedGestureStateRef.current[knobId];
     },
-    [busKey, dispatchIntent, getTargetsForKnob]
+    [busKey, dispatchIntent, expanded, expandedKnobId, getTargetsForKnob]
   );
 
   const onMappedParamChange = React.useCallback(
@@ -361,7 +365,7 @@ export function KnobRow({
     (knobId) => getTargetsForKnob(knobId).length > 0,
     [getTargetsForKnob]
   );
-  
+
   const onKnobTap = React.useCallback(
     (knobId) => {
       // if (!mappingArmed) return;
@@ -497,7 +501,11 @@ export function KnobRow({
                 canAcceptMap={canAcceptMapForKnob(k.id)}
                 // onLongPress={onKnobLongPressExpand}
                 onLongPress={() => onKnobLongPressExpand(k.id)}
-                interactive={mappingArmed || knobHasMappedTarget(k.id)}
+                // interactive={mappingArmed || knobHasMappedTarget(k.id)}
+                interactive={
+                  mappingArmed ||
+                  (knobHasMappedTarget(k.id) && (!expanded || expandedKnobId === k.id))
+                }
                 dimmed={expanded && expandedKnobId !== k.id}
                 yOffset={expanded ? (expandedKnobId === k.id ? -5 : 5) : 0}
               />
