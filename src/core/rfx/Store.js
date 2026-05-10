@@ -1215,6 +1215,55 @@ export const useRfxStore = create((set, get) => ({
     });
   },
 
+  reorderKnobMappingTarget: ({ busId, knobId, fromIndex, toIndex }) => {
+    const b = String(busId || "");
+    const k = String(knobId || "");
+    const from = Number(fromIndex);
+    const to = Number(toIndex);
+
+    if (!b || !k || !Number.isInteger(from) || !Number.isInteger(to) || from === to) return;
+
+    set((s) => {
+      const knobMapByBusId = s.perf.knobMapByBusId || {};
+      const busMap = knobMapByBusId[b] || {};
+      const prevTargets = getKnobTargets(busMap, k);
+
+      if (!prevTargets.length) return s;
+      if (
+        from < 0 ||
+        to < 0 ||
+        from >= prevTargets.length ||
+        to >= prevTargets.length
+      ) {
+        return s;
+      }
+
+      const nextTargets = [...prevTargets];
+      const [moved] = nextTargets.splice(from, 1);
+      nextTargets.splice(to, 0, moved);
+
+      get().logEvent("knobmap:target_reordered", {
+        busId: b,
+        knobId: k,
+        fromIndex: from,
+        toIndex: to,
+      });
+
+      return {
+        perf: {
+          ...s.perf,
+          knobMapByBusId: {
+            ...knobMapByBusId,
+            [b]: {
+              ...busMap,
+              [k]: nextTargets,
+            },
+          },
+        },
+      };
+    });
+  },
+
   removeKnobMappingTarget: ({ busId, knobId, fxGuid, paramIdx }) => {
     const b = String(busId || "");
     const k = String(knobId || "");

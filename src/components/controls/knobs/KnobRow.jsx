@@ -56,6 +56,7 @@ export function KnobRow({
   const setKnobValueLocal = useRfxStore((s) => s.setKnobValueLocal);
   const commitKnobMapping = useRfxStore((s) => s.commitKnobMapping);
   const unmapParamFromBus = useRfxStore((s) => s.unmapParamFromBus);
+  const reorderKnobMappingTarget = useRfxStore((s) => s.reorderKnobMappingTarget);
 
   const fxParamsOverlayByGuid = useRfxStore((s) => s.ops?.overlay?.fxParamsByGuid || EMPTY_OBJ);
   const fxParamsByGuidEntities = useRfxStore((s) => s.entities?.fxParamsByGuid || EMPTY_OBJ);
@@ -96,7 +97,8 @@ export function KnobRow({
     for (const [knobId, rawTarget] of entries) {
       const targets = normalizeTargets(rawTarget);
 
-      for (const t of targets) {
+      for (let i = 0; i < targets.length; i += 1) {
+        const t = targets[i];
         if (!t?.fxGuid || !Number.isFinite(Number(t?.paramIdx))) continue;
 
         out.push({
@@ -108,7 +110,8 @@ export function KnobRow({
           paramName: String(t.paramName || `Param ${Number(t.paramIdx)}`),
           pluginName: String(t.fxName || "Plugin"),
           invert: t.invert === true,
-          isPrimary: targets.indexOf(t) === 0,
+          isPrimary: i === 0,
+          targetIndex: i,
         });
       }
     }
@@ -121,7 +124,19 @@ export function KnobRow({
   const localValuesRef = React.useRef({});
   const activeLocalKnobsRef = React.useRef(new Set());
   const groupedGestureStateRef = React.useRef({});
-
+  const [draggingRowIdx, setDraggingRowIdx] = React.useState(null);
+  const dragStateRef = React.useRef({
+    active: false,
+    sourceRowIdx: null,
+    sourceKnobId: "",
+    sourceTargetIndex: -1,
+    pointerId: null,
+    startClientY: 0,
+    currentClientY: 0,
+    holdTimer: null,
+    holdStarted: false,
+    rowHeight: 0,
+  });
   React.useEffect(() => {
     localValuesRef.current = localValues;
   }, [localValues]);
@@ -363,6 +378,92 @@ export function KnobRow({
     [busKey, unmapParamFromBus]
   );
 
+  const cancelMapCardDrag = React.useCallback(() => {
+    const d = dragStateRef.current;
+    if (d.holdTimer) {
+      clearTimeout(d.holdTimer);
+      d.holdTimer = null;
+    }
+    dragStateRef.current = {
+      active: false,
+      sourceRowIdx: null,
+      sourceKnobId: "",
+      sourceTargetIndex: -1,
+      pointerId: null,
+      startClientY: 0,
+      currentClientY: 0,
+      holdTimer: null,
+      holdStarted: false,
+      rowHeight: 0,
+    };
+    setDraggingRowIdx(null);
+  }, []);
+
+  React.useEffect(() => () => cancelMapCardDrag(), [cancelMapCardDrag]);
+
+  const startMapCardDrag = React.useCallback((evt, entry, rowIdx) => {
+    if (!entry?.knobId || !Number.isInteger(entry?.targetIndex)) return;
+    if (evt.button !== undefined && evt.button !== 0) return;
+
+    cancelMapCardDrag();
+    const rowHeight = Number(evt?.currentTarget?.getBoundingClientRect?.().height) || 0;
+    const pointerId = Number.isFinite(evt.pointerId) ? evt.pointerId : null;
+
+    dragStateRef.current = {
+      active: false,
+      sourceRowIdx: rowIdx,
+      sourceKnobId: String(entry.knobId),
+      sourceTargetIndex: Number(entry.targetIndex),
+      pointerId,
+      startClientY: Number(evt.clientY || 0),
+      currentClientY: Number(evt.clientY || 0),
+      holdTimer: null,
+      holdStarted: true,
+      rowHeight,
+    };
+
+    dragStateRef.current.holdTimer = setTimeout(() => {
+      const d = dragStateRef.current;
+      if (!d.holdStarted) return;
+      d.active = true;
+      setDraggingRowIdx(d.sourceRowIdx);
+    }, 300);
+  }, [cancelMapCardDrag]);
+
+  const updateMapCardDrag = React.useCallback((evt) => {
+    const d = dragStateRef.current;
+    if (!d.holdStarted) return;
+    if (d.pointerId !== null && evt.pointerId !== d.pointerId) return;
+    d.currentClientY = Number(evt.clientY || d.currentClientY || 0);
+    if (!d.active) return;
+
+    const rowH = d.rowHeight > 0 ? d.rowHeight : 1;
+    const deltaRows = Math.round((d.currentClientY - d.startClientY) / rowH);
+    const clampedIdx = Math.max(0, Math.min(2, Number(d.sourceRowIdx) + deltaRows));
+    if (clampedIdx !== draggingRowIdx) setDraggingRowIdx(clampedIdx);
+  }, [draggingRowIdx]);
+
+  const endMapCardDrag = React.useCallback(() => {
+    const d = dragStateRef.current;
+    const shouldCommit =
+      d.active &&
+      d.sourceKnobId &&
+      Number.isInteger(d.sourceTargetIndex) &&
+      Number.isInteger(draggingRowIdx) &&
+      d.sourceRowIdx !== draggingRowIdx;
+
+    if (shouldCommit) {
+      reorderKnobMappingTarget?.({
+        busId: busKey,
+        knobId: d.sourceKnobId,
+        fromIndex: d.sourceTargetIndex,
+        toIndex: draggingRowIdx,
+      });
+    }
+    cancelMapCardDrag();
+  }, [busKey, cancelMapCardDrag, draggingRowIdx, reorderKnobMappingTarget]);
+
+
   const knobHasMappedTarget = React.useCallback(
     (knobId) => getTargetsForKnob(knobId).length > 0,
     [getTargetsForKnob]
@@ -581,6 +682,11 @@ export function KnobRow({
                 <div key={`map-row-${rowIdx}`} style={{ minHeight: 0 }}>
                   {rowIdx < 3 && entry ? (
                     <MapCard
+                      draggableActive={draggingRowIdx === rowIdx}
+                      draggableGhost={draggingRowIdx !== null && draggingRowIdx !== rowIdx}
+                      onDragHoldStart={(evt) => startMapCardDrag(evt, entry, rowIdx)}
+                      onDragHoldMove={updateMapCardDrag}
+                      onDragHoldEnd={endMapCardDrag}
                       paramName={entry.paramName}
                       pluginName={entry.pluginName}
                       value01={readFxParam01(
