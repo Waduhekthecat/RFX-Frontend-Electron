@@ -667,24 +667,7 @@ export function KnobRow({
             transition: "height 1000ms ease, opacity 1000ms ease, padding 1000ms ease",
           }}
         >
-          {expanded ? (
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "center",
-                paddingBottom: 8,
-              }}
-            >
-              <button
-                type="button"
-                onClick={collapseExpanded}
-                style={styles.expandToggleBtn}
-                title="Collapse expanded knob row"
-              >
-                <span style={styles.expandToggleGlyph}>▾</span>
-              </button>
-            </div>
-          ) : null}
+          
           <div
             style={{
               height: "100%",
