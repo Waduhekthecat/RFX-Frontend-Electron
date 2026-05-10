@@ -50,6 +50,7 @@ export function KnobRow({
   onExpandedChange,
 }) {
   const [expanded, setExpanded] = React.useState(false);
+    const [expandedKnobId, setExpandedKnobId] = React.useState(null);
 
   const dispatchIntent = useRfxStore((s) => s.dispatchIntent);
   const setKnobValueLocal = useRfxStore((s) => s.setKnobValueLocal);
@@ -87,7 +88,12 @@ export function KnobRow({
   const mappedParamsForExpandedView = React.useMemo(() => {
     const out = [];
 
-    for (const [knobId, rawTarget] of Object.entries(mapForBus)) {
+    // for (const [knobId, rawTarget] of Object.entries(mapForBus)) {
+    const entries = expandedKnobId
+      ? [[expandedKnobId, mapForBus?.[expandedKnobId]]]
+      : Object.entries(mapForBus);
+
+    for (const [knobId, rawTarget] of entries) {
       const targets = normalizeTargets(rawTarget);
 
       for (const t of targets) {
@@ -106,7 +112,8 @@ export function KnobRow({
     }
 
     return out.sort((a, b) => a.paramName.localeCompare(b.paramName));
-  }, [mapForBus]);
+  // }, [mapForBus]);
+    }, [mapForBus, expandedKnobId]);
 
   const [localValues, setLocalValues] = React.useState(() => ({}));
   const localValuesRef = React.useRef({});
@@ -358,12 +365,15 @@ export function KnobRow({
     [mappingArmed, commitKnobMapping, busKey]
   );
 
-  const onKnobLongPressExpand = React.useCallback(() => {
+  // const onKnobLongPressExpand = React.useCallback(() => {
+    const onKnobLongPressExpand = React.useCallback((knobId) => {
+    setExpandedKnobId(knobId);
     setExpanded((prev) => {
       if (prev) return prev;
       onExpandedChange?.(true);
       return true;
     });
+    setExpandedKnobId(null);
   }, [onExpandedChange]);
 
   const knobHasMappedTarget = React.useCallback(
@@ -461,7 +471,8 @@ export function KnobRow({
                 onDropMap={onDropMap}
                 mapDragActive={mapDragActive}
                 canAcceptMap={canAcceptMapForKnob(k.id)}
-                onLongPress={onKnobLongPressExpand}
+                // onLongPress={onKnobLongPressExpand}
+                onLongPress={() => onKnobLongPressExpand(k.id)}
                 interactive={mappingArmed || knobHasMappedTarget(k.id)}
               />
             ))}
