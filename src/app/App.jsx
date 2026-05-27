@@ -10,6 +10,7 @@ import { PluginView } from "../views/edit/plugin/PluginView";
 import { RouteView } from "../views/route/RouteView";
 import { SystemView } from "../views/system/SystemView";
 import { CoreInspectorView } from "../views/dev/CoreInspectorView";
+import { PluginManager } from "../views/system/pluginmanager/PluginManager";
 
 const Router =
     import.meta.env.MODE === "development" ? BrowserRouter : HashRouter;
@@ -31,6 +32,7 @@ export function App() {
                                 </Route>
                                 <Route path="/routing" element={<RouteView />} />
                                 <Route path="/system" element={<SystemView />} />
+                                <Route path="/system/plugins" element={<PluginManager />} />
                                 <Route path="/dev/core" element={<CoreInspectorView />} />
                             </Route>
                         </Routes>
