@@ -3,7 +3,7 @@ import { useIntent } from "../../core/useIntent";
 import { useRfxStore } from "../../core/rfx/Store";
 import { KnobRow } from "../../components/controls/knobs/KnobRow";
 import { BusCardArea } from "./components/_index";
-import { normalizeMode, clamp01 } from "../../core/DomainHelpers";
+import { normalizeMode, clamp01, normBusId } from "../../core/DomainHelpers";
 import { styles, KNOB_STRIP_H } from "./_styles";
 
 const EMPTY_ARR = Object.freeze([]);
@@ -58,6 +58,9 @@ export function PerformView() {
   );
 
   const mappingArmed = useRfxStore((s) => s.perf?.mappingArmed ?? null);
+  const sliderBusVolumeMapByBusId = useRfxStore((s) => s.perf?.sliderBusVolumeMapByBusId ?? EMPTY_OBJ);
+  const setSliderBusVolumeMapping = useRfxStore((s) => s.setSliderBusVolumeMapping);
+  const dispatchIntent = useRfxStore((s) => s.dispatchIntent);
 
   const fxParamsOverlayByGuid = useRfxStore(
     (s) => s.ops?.overlay?.fxParamsByGuid ?? EMPTY_OBJ
@@ -92,6 +95,26 @@ export function PerformView() {
   }, [buses, activeBusId, busModesById, metersById]);
 
   const activeId = vm.activeBusId || "NONE";
+
+  const onDropMapToKnob = React.useCallback((knobId, payload) => {
+    const m = String(payload || "").match(/^busvol:(.+)$/);
+    if (!m) return;
+    if (!String(knobId || "").endsWith("_k7")) return;
+    setSliderBusVolumeMapping({ busId: activeId, targetBusId: String(m[1]) });
+  }, [activeId, setSliderBusVolumeMapping]);
+
+  const onSliderChange = React.useCallback((next01) => {
+    const mappedBusId = sliderBusVolumeMapByBusId?.[String(activeId || "")];
+    if (!mappedBusId) return;
+    dispatchIntent({ name: "setTrackVolume", trackGuid: normBusId(mappedBusId), value: clamp01(next01), phase: "preview", gestureId: `perfSlider:${activeId}` });
+  }, [activeId, sliderBusVolumeMapByBusId, dispatchIntent]);
+
+  const onSliderCommit = React.useCallback((value01) => {
+    const mappedBusId = sliderBusVolumeMapByBusId?.[String(activeId || "")];
+    if (!mappedBusId) return;
+    dispatchIntent({ name: "setTrackVolume", trackGuid: normBusId(mappedBusId), value: clamp01(value01), phase: "commit", gestureId: `perfSlider:${activeId}` });
+  }, [activeId, sliderBusVolumeMapByBusId, dispatchIntent]);
+
 
   const knobs = React.useMemo(() => {
   const busId = String(activeId || "NONE");
@@ -151,6 +174,7 @@ export function PerformView() {
               normalizeMode(vm?.busModes?.[busId] || "linear")
             }
             onSelectBus={(busId) => intent({ name: "selectActiveBus", busId })}
+            onDragMapBusVolume={() => {}}
           />
         </div>
 
@@ -176,6 +200,10 @@ export function PerformView() {
             mappingArmed={mappingArmed}
             mapDragActive={false}
             onExpandedChange={setKnobRowExpanded}
+            onDropMap={onDropMapToKnob}
+            sliderBusVolumeTargetBusId={sliderBusVolumeMapByBusId?.[String(activeId || "")] || ""}
+            onSliderMappedChange={onSliderChange}
+            onSliderMappedCommit={onSliderCommit}
           />
         </div>
       </div>

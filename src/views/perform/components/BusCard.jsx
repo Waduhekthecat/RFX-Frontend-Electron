@@ -1,3 +1,4 @@
+import React from "react";
 import { Panel } from "../../../components/ui/Panel";
 import { VerticalMeter } from "../../../components/ui/meters/VerticalMeter";
 import { RoutingWell } from "./RoutingWell";
@@ -9,9 +10,19 @@ export function BusCard({
   meters = { l: 0, r: 0 },
   onSelect,
   routingMode = "linear", // "linear" | "parallel" | "lcr"
+  onDragMapBusVolume,
 }) {
   const busId = bus?.id || "FX_?";
   const label = bus?.label ?? busId;
+
+  function onDragStartMap(e) {
+    e.stopPropagation();
+    if (e.dataTransfer) {
+      e.dataTransfer.setData("text/plain", `busvol:${busId}`);
+      e.dataTransfer.effectAllowed = "copy";
+    }
+    onDragMapBusVolume?.(busId);
+  }
 
   return (
     <Panel
@@ -28,6 +39,17 @@ export function BusCard({
 
             {isActive && <div className={styles.BusCardActivePill}>Active</div>}
           </div>
+
+          <button
+            type="button"
+            draggable
+            onDragStart={onDragStartMap}
+            onClick={(e) => e.stopPropagation()}
+            title="Drag to vertical knob slider to map BUS volume"
+            className={styles.BusCardMapButton}
+          >
+            <span aria-hidden="true" style={{ fontSize: 13, lineHeight: 1 }}>🎚️</span>
+          </button>
 
           {/* Routing visualization */}
           <div className={styles.BusCardRoutingSlot}>

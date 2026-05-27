@@ -315,6 +315,7 @@ export const useRfxStore = create((set, get) => ({
     knobValuesByBusId: {},
     knobMapByBusId: {},
     mappingArmed: null,
+    sliderBusVolumeMapByBusId: {},
   },
 
   session: {
@@ -1087,6 +1088,25 @@ export const useRfxStore = create((set, get) => ({
     }));
   },
 
+
+  setSliderBusVolumeMapping: ({ busId, targetBusId }) => {
+    const b = String(busId || "");
+    const t = String(targetBusId || "");
+    if (!b || !t) return;
+
+    set((s) => ({
+      perf: {
+        ...s.perf,
+        sliderBusVolumeMapByBusId: {
+          ...(s.perf?.sliderBusVolumeMapByBusId || {}),
+          [b]: t,
+        },
+      },
+    }));
+
+    get().logEvent("knobmap:slider_bus_volume_mapped", { busId: b, targetBusId: t });
+  },
+  
   clearKnobMappingArmed: () => {
     set((s) => ({ perf: { ...s.perf, mappingArmed: null } }));
   },

@@ -2,7 +2,7 @@ import { BusCard } from "./BusCard";
 import { useRfxStore } from "../../../core/rfx/Store";
 import { styles } from "../_styles";
 
-export function BusCardArea({ vm, onSelectBus, getRoutingMode }) {
+export function BusCardArea({ vm, onSelectBus, getRoutingMode, onDragMapBusVolume }) {
   // ✅ Telemetry-fed meters (fast path). Canonical source is meters.byId.
   // Fallback to perf.metersById for compatibility.
   const metersById = useRfxStore((s) => s.meters?.byId || s.perf?.metersById || {});
@@ -30,6 +30,7 @@ export function BusCardArea({ vm, onSelectBus, getRoutingMode }) {
             meters={m}
             routingMode={routingMode}
             onSelect={() => onSelectBus?.(b.id)}
+            onDragMapBusVolume={onDragMapBusVolume}
           />
         );
       })}

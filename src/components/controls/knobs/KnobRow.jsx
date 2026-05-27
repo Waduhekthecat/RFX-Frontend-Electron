@@ -49,6 +49,9 @@ export function KnobRow({
   onDropMap,
   mapDragActive = false,
   onExpandedChange,
+  sliderBusVolumeTargetBusId = "",
+  onSliderMappedChange,
+  onSliderMappedCommit,
 }) {
   const [expanded, setExpanded] = React.useState(false);
   const [expandedKnobId, setExpandedKnobId] = React.useState(null);
@@ -190,6 +193,9 @@ export function KnobRow({
       });
 
       setKnobValueLocal({ busId: busKey, knobId, value01: v01 });
+      if (knobId === `${busKey}_k7` && sliderBusVolumeTargetBusId) {
+        onSliderMappedChange?.(v01);
+      }
 
       const targets = getTargetsForKnob(knobId);
       if (!targets.length) return;
@@ -271,7 +277,7 @@ export function KnobRow({
 
       groupedGestureStateRef.current[knobId] = { valuesByTargetKey };
     },
-    [busKey, dispatchIntent, expanded, expandedKnobId, getTargetsForKnob, setKnobValueLocal, fxParamSources]
+    [busKey, dispatchIntent, expanded, expandedKnobId, getTargetsForKnob, setKnobValueLocal, fxParamSources, sliderBusVolumeTargetBusId, onSliderMappedChange]
   );
 
   const onKnobCommit = React.useCallback(
@@ -657,7 +663,13 @@ export function KnobRow({
                 mappingArmed={!!mappingArmed}
                 onTap={onKnobTap}
                 onChange={(next) => onKnobChange(sliderKnob.id, next)}
-                onCommit={() => onKnobCommit(sliderKnob.id)}
+                onCommit={() => {
+                  onKnobCommit(sliderKnob.id);
+                  const vv = Number.isFinite(localValues?.[sliderKnob.id]) ? localValues[sliderKnob.id] : sliderKnob.value;
+                  if (sliderBusVolumeTargetBusId) onSliderMappedCommit?.(clamp01(vv));
+                }}
+                mappedLabel={sliderBusVolumeTargetBusId ? `BUS VOL • ${sliderBusVolumeTargetBusId}` : sliderKnob.mappedLabel}
+                mapped={sliderBusVolumeTargetBusId ? true : sliderKnob.mapped}
                 onDropMap={onDropMap}
                 mapDragActive={mapDragActive}
                 canAcceptMap={canAcceptMapForKnob(sliderKnob.id)}
