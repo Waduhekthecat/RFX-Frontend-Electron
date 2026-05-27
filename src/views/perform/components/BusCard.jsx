@@ -26,9 +26,18 @@ export function BusCard({
 
   return (
     <Panel
-      as="button"
+      as="div"
+      role="button"
+      tabIndex={0}
+      interactive
       active={isActive}
       onClick={onSelect}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect?.(e);
+        }
+      }}
       className={styles.BusCardButton}
     >
       <div className={styles.BusCardInnerRow}>
