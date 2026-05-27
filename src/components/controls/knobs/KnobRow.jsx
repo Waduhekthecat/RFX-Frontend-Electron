@@ -676,13 +676,13 @@ export function KnobRow({
                 onLongPress={() => onKnobLongPressExpand(sliderKnob.id)}
                 interactive={
                   mappingArmed ||
-                  (knobHasMappedTarget(sliderKnob.id) &&
+                   ((knobHasMappedTarget(sliderKnob.id) || !!sliderBusVolumeTargetBusId) &&
                     (!expanded || expandedKnobId === sliderKnob.id))
                 }
                 tapEnabled={
                   expanded &&
                   expandedKnobId !== sliderKnob.id &&
-                  knobHasMappedTarget(sliderKnob.id)
+                  (knobHasMappedTarget(sliderKnob.id) || !!sliderBusVolumeTargetBusId)
                 }
                 dimmed={expanded && expandedKnobId !== sliderKnob.id}
                 yOffset={expanded ? (expandedKnobId === sliderKnob.id ? -5 : 5) : 0}
