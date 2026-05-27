@@ -18,6 +18,7 @@ function setGlobalDragLock(on) {
 
 const SMOOTH_ALPHA = 0.38;
 const SMOOTH_EPS = 0.0008;
+const DRAG_PIXELS_FOR_FULL_SWEEP = 140;
 
 export function VerticalKnobSlider({
   id,
@@ -185,7 +186,7 @@ export function VerticalKnobSlider({
 
     if (!dragging || !startRef.current) return;
     const dy = startRef.current.y - e.clientY;
-    const next = clamp01(startRef.current.v + dy / 250);
+    const next = clamp01(startRef.current.v + dy / DRAG_PIXELS_FOR_FULL_SWEEP);
 
     setDisplayValue(next);
     onChange?.(next);
