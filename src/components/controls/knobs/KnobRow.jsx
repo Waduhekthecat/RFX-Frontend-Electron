@@ -1,6 +1,7 @@
 import React from "react";
 import { clamp01 } from "../../../core/DomainHelpers";
 import { Knob } from "./Knob";
+import { VerticalKnobSlider } from "./VerticalKnobSlider";
 import { styles } from "./_styles";
 import { useRfxStore } from "../../../core/rfx/Store";
 import { Panel } from "../../ui/Panel";
@@ -79,7 +80,10 @@ export function KnobRow({
   );
 
   const visibleKnobs = React.useMemo(() => (knobs || []).slice(0, 7), [knobs]);
-  const interactiveKnobs = React.useMemo(() => visibleKnobs.slice(0, 6), [visibleKnobs]);
+
+  const interactiveKnobs = visibleKnobs;
+  const rotaryKnobs = React.useMemo(() => visibleKnobs.slice(0, 6), [visibleKnobs]);
+  const sliderKnob = visibleKnobs[6] || null;
 
   const getTargetsForKnob = React.useCallback(
     (knobId) => normalizeTargets(mapForBus?.[knobId]),
@@ -611,13 +615,13 @@ export function KnobRow({
         >
           <div
             style={{
-              ...styles.rowGrid(6),
+              ...styles.rowGrid(7),
               height: "100%",
               background: "transparent",
               boxShadow: "none",
             }}
           >
-            {interactiveKnobs.map((k) => (
+            {rotaryKnobs.map((k) => (
               <Knob
                 key={k.id}
                 id={k.id}
@@ -632,9 +636,7 @@ export function KnobRow({
                 onDropMap={onDropMap}
                 mapDragActive={mapDragActive}
                 canAcceptMap={canAcceptMapForKnob(k.id)}
-                // onLongPress={onKnobLongPressExpand}
                 onLongPress={() => onKnobLongPressExpand(k.id)}
-                // interactive={mappingArmed || knobHasMappedTarget(k.id)}
                 interactive={
                   mappingArmed ||
                   (knobHasMappedTarget(k.id) && (!expanded || expandedKnobId === k.id))
@@ -644,6 +646,36 @@ export function KnobRow({
                 yOffset={expanded ? (expandedKnobId === k.id ? -5 : 5) : 0}
               />
             ))}
+            {sliderKnob ? (
+              <VerticalKnobSlider
+                key={sliderKnob.id}
+                id={sliderKnob.id}
+                label={sliderKnob.label}
+                mapped={!!sliderKnob.mapped}
+                mappedLabel={sliderKnob.mappedLabel || (sliderKnob.mapped ? "Mapped" : "")}
+                value={renderValueFor(sliderKnob)}
+                mappingArmed={!!mappingArmed}
+                onTap={onKnobTap}
+                onChange={(next) => onKnobChange(sliderKnob.id, next)}
+                onCommit={() => onKnobCommit(sliderKnob.id)}
+                onDropMap={onDropMap}
+                mapDragActive={mapDragActive}
+                canAcceptMap={canAcceptMapForKnob(sliderKnob.id)}
+                onLongPress={() => onKnobLongPressExpand(sliderKnob.id)}
+                interactive={
+                  mappingArmed ||
+                  (knobHasMappedTarget(sliderKnob.id) &&
+                    (!expanded || expandedKnobId === sliderKnob.id))
+                }
+                tapEnabled={
+                  expanded &&
+                  expandedKnobId !== sliderKnob.id &&
+                  knobHasMappedTarget(sliderKnob.id)
+                }
+                dimmed={expanded && expandedKnobId !== sliderKnob.id}
+                yOffset={expanded ? (expandedKnobId === sliderKnob.id ? -5 : 5) : 0}
+              />
+            ) : null}
 
             {/* <button
               type="button"
