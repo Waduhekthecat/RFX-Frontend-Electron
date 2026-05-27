@@ -13,8 +13,7 @@ function ModeBadge({ mode }) {
   const m = String(mode || "linear").toUpperCase();
   return <div className={styles.ModeBadge}>{m}</div>;
 }
-
-function LanePill({ name, on, active }) {
+function LanePill({ name, on, active, onDragMapBusVolume }) {
   return (
     <div
       className={[
@@ -34,6 +33,25 @@ function LanePill({ name, on, active }) {
       >
         {on ? "ON" : "OFF"}
       </div>
+      {on ? (
+        <button
+          type="button"
+          draggable
+          onClick={(e) => e.stopPropagation()}
+          onDragStart={(e) => {
+            e.stopPropagation();
+            if (e.dataTransfer) {
+              e.dataTransfer.setData("text/plain", `busvol:${name}`);
+              e.dataTransfer.effectAllowed = "copy";
+            }
+            onDragMapBusVolume?.(name);
+          }}
+          title={`Drag to vertical knob slider to map ${name} volume`}
+          className={styles.LaneMapButton}
+        >
+          <span aria-hidden="true" style={{ fontSize: 12, lineHeight: 1 }}>🎚️</span>
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -47,7 +65,7 @@ function LanePill({ name, on, active }) {
  * - mode: "linear" | "parallel" | "lcr"
  * - active: highlight (if bus card is selected)
  */
-export function RoutingWell({ busId = "FX_1", mode = "linear", active = false }) {
+export function RoutingWell({ busId = "FX_1", mode = "linear", active = false, onDragMapBusVolume }) {
   const on = lanesForMode(mode);
 
   return (
@@ -60,9 +78,9 @@ export function RoutingWell({ busId = "FX_1", mode = "linear", active = false })
 
       {/* Lane rows */}
       <div className="flex flex-col gap-2 min-h-0">
-        <LanePill name={`${busId}A`} on={on.A} active={active && on.A} />
-        <LanePill name={`${busId}B`} on={on.B} active={active && on.B} />
-        <LanePill name={`${busId}C`} on={on.C} active={active && on.C} />
+       <LanePill name={`${busId}A`} on={on.A} active={active && on.A} onDragMapBusVolume={onDragMapBusVolume} />
+        <LanePill name={`${busId}B`} on={on.B} active={active && on.B} onDragMapBusVolume={onDragMapBusVolume} />
+        <LanePill name={`${busId}C`} on={on.C} active={active && on.C} onDragMapBusVolume={onDragMapBusVolume} />
       </div>
 
       {/* Footer hint */}

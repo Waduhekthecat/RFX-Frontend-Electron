@@ -62,7 +62,7 @@ export function BusCard({
 
           {/* Routing visualization */}
           <div className={styles.BusCardRoutingSlot}>
-            <RoutingWell busId={busId} mode={routingMode} active={isActive} />
+            <RoutingWell busId={busId} mode={routingMode} active={isActive} onDragMapBusVolume={onDragMapBusVolume} />
           </div>
         </div>
 
