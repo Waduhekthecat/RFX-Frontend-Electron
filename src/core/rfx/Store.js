@@ -534,6 +534,7 @@ export const useRfxStore = create((set, get) => ({
           knobValuesByBusId: s.perf.knobValuesByBusId || {},
           knobMapByBusId: s.perf.knobMapByBusId || {},
           mappingArmed: s.perf.mappingArmed ?? null,
+          sliderBusVolumeMapByBusId: s.perf.sliderBusVolumeMapByBusId || {},
         }
         : {
           ...s.perf,
@@ -1106,7 +1107,7 @@ export const useRfxStore = create((set, get) => ({
 
     get().logEvent("knobmap:slider_bus_volume_mapped", { busId: b, targetBusId: t });
   },
-  
+
   clearKnobMappingArmed: () => {
     set((s) => ({ perf: { ...s.perf, mappingArmed: null } }));
   },

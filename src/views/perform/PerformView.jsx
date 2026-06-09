@@ -130,7 +130,7 @@ export function PerformView() {
       : "";
 
     // const base01 = Number.isFinite(values[knobId]) ? values[knobId] : 0.5;
-      const base01 = target ? (Number.isFinite(values[knobId]) ? values[knobId] : 0.5) : 0.5;
+      const base01 = Number.isFinite(values[knobId]) ? values[knobId] : 0.5;
 
     const param01 =
       target?.fxGuid && Number.isFinite(Number(target?.paramIdx))
