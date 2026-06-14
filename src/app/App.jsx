@@ -11,6 +11,7 @@ import { RouteView } from "../views/route/RouteView";
 import { SystemView } from "../views/system/SystemView";
 import { CoreInspectorView } from "../views/dev/CoreInspectorView";
 import { PluginManager } from "../views/system/pluginmanager/PluginManager";
+import { MidiRuntime } from "../core/midi/MidiRuntime";
 
 const Router =
     import.meta.env.MODE === "development" ? BrowserRouter : HashRouter;
@@ -19,6 +20,7 @@ export function App() {
     return (
         <React.StrictMode>
             <TransportProvider>
+                <MidiRuntime />
                 <BootGate allowSkip autoStart>
                     <Router>
                         <Routes>
