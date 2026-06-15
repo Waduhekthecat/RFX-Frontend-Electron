@@ -1,7 +1,7 @@
-import { MidiInputService } from "./MidiInputService";
-import { MidiMapper } from "./MidiMapper";
-import { MidiCommandBridge } from "./MidiCommandBridge";
-import { ModeManager } from "../modes/ModeManager";
+import { MidiInputService } from "./MidiInputService.js";
+import { MidiMapper } from "./MidiMapper.js";
+import { MidiCommandBridge } from "./MidiCommandBridge.js";
+import { ModeManager } from "../modes/ModeManager.js";
 
 let midiRuntime = null;
 
@@ -12,12 +12,18 @@ export function initMidi({ dispatchCommand } = {}) {
   const midiInputService = new MidiInputService();
   const midiMapper = new MidiMapper();
 
-  const safeDispatchCommand =
-    typeof dispatchCommand === "function"
-      ? dispatchCommand
-      : (command, payload = {}) => {
-          console.log("[MIDI → RFX COMMAND]", command, payload);
-        };
+ const safeDispatchCommand =
+  typeof dispatchCommand === "function"
+    ? dispatchCommand
+    : (command, payload = {}) => {
+        console.log("[MIDI → RFX COMMAND]", command, payload);
+
+        window.dispatchEvent(
+          new CustomEvent("rfx-midi-command", {
+            detail: { command, payload },
+          })
+        );
+      };
 
   const midiCommandBridge = new MidiCommandBridge({
     modeManager,

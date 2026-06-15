@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { initMidi } from "./initMidi";
+import { initMidi } from "./MidiInitialize.js";
 
 export function MidiRuntime() {
   useEffect(() => {

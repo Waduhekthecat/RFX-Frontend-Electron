@@ -13,6 +13,7 @@
     "electron:dev": "concurrently -k \"vite\" \"wait-on http://localhost:5173 && VITE_DEV_SERVER_URL=http://localhost:5173 electron .\""
   },
   "dependencies": {
+    "midi": "^2.0.0",
     "osc": "^2.4.5",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
@@ -22,6 +23,7 @@
     "zustand": "^5.0.11"
   },
   "devDependencies": {
+    "@electron/rebuild": "^3.7.2",
     "@eslint/js": "^9.39.1",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",

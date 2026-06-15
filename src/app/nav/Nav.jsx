@@ -7,10 +7,12 @@ import { styles, cx } from "./_styles";
 const BASE_TABS = [
   { label: "Perform", to: "/" },
   { label: "Edit", to: "/edit" },
+  { label: "Looper", to: "/looper" },
+  { label: "Automation", to: "/automation" },
+  { label: "Tuner", to: "/tuner" },
   { label: "Routing", to: "/routing" },
   { label: "System", to: "/system" },
 ];
-
 
 function ModeBadge({ mode }) {
   const m = normalizeMode(mode);

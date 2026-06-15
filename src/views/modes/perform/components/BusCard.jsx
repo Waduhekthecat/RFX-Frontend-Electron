@@ -1,6 +1,6 @@
 import React from "react";
-import { Panel } from "../../../components/ui/Panel";
-import { VerticalMeter } from "../../../components/ui/meters/VerticalMeter";
+import { Panel } from "../../../../components/ui/Panel";
+import { VerticalMeter } from "../../../../components/ui/meters/VerticalMeter";
 import { RoutingWell } from "./RoutingWell";
 import { styles } from "../_styles";
 

@@ -1,5 +1,5 @@
 import { BusCard } from "./BusCard";
-import { useRfxStore } from "../../../core/rfx/Store";
+import { useRfxStore } from "../../../../core/rfx/Store";
 import { styles } from "../_styles";
 
 export function BusCardArea({ vm, onSelectBus, getRoutingMode, onDragMapBusVolume }) {

@@ -1,9 +1,9 @@
 import React from "react";
-import { useIntent } from "../../core/useIntent";
-import { useRfxStore } from "../../core/rfx/Store";
-import { KnobRow } from "../../components/controls/knobs/KnobRow";
+import { useIntent } from "../../../core/useIntent";
+import { useRfxStore } from "../../../core/rfx/Store";
+import { KnobRow } from "../../../components/controls/knobs/KnobRow";
 import { BusCardArea } from "./components/_index";
-import { normalizeMode, clamp01, normBusId } from "../../core/DomainHelpers";
+import { normalizeMode, clamp01, normBusId } from "../../../core/DomainHelpers";
 import { styles, KNOB_STRIP_H } from "./_styles";
 
 const EMPTY_ARR = Object.freeze([]);

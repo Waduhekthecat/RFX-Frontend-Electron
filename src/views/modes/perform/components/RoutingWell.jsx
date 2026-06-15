@@ -1,5 +1,5 @@
 import React from "react";
-import { Inset } from "../../../components/ui/Panel";
+import { Inset } from "../../../../components/ui/Panel";
 import { styles } from "../_styles";
 
 function lanesForMode(mode) {

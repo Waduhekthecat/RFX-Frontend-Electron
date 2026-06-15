@@ -5,12 +5,11 @@ export const MIDI_CONTROLS = Object.freeze({
   FS_D: "FS_D",
 
   FS_A_LONG: "FS_A_LONG",
-  FS_B_LONG: "FS_B_LONG",
+  FS_B_RELEASE: "FS_B_RELEASE",
   FS_C_LONG: "FS_C_LONG",
   FS_D_LONG: "FS_D_LONG",
 
-  EXPR_1: "EXPR_1",
-  EXPR_2: "EXPR_2",
+  EXPR: "EXPR",
 });
 
 export const MIDI_EVENT_TYPES = Object.freeze({
@@ -20,21 +19,26 @@ export const MIDI_EVENT_TYPES = Object.freeze({
 });
 
 const FS_CC_MAP = {
-  10: MIDI_CONTROLS.FS_A,
-  11: MIDI_CONTROLS.FS_B,
-  12: MIDI_CONTROLS.FS_C,
-  13: MIDI_CONTROLS.FS_D,
+  11: MIDI_CONTROLS.FS_A,
+  12: MIDI_CONTROLS.FS_B,
+  13: MIDI_CONTROLS.FS_C,
+  14: MIDI_CONTROLS.FS_D,
 
-  50: MIDI_CONTROLS.FS_D_LONG,
-  51: MIDI_CONTROLS.FS_C_LONG,
+  101: MIDI_CONTROLS.FS_A_LONG,
+  102: MIDI_CONTROLS.FS_B_RELEASE,
+  103: MIDI_CONTROLS.FS_C_LONG,
+  104: MIDI_CONTROLS.FS_D_LONG,
 
-  7: MIDI_CONTROLS.EXPR_1,
-  8: MIDI_CONTROLS.EXPR_2,
+  10: MIDI_CONTROLS.EXPR,
 };
+
+const EXPRESSION_CONTROLS = new Set([
+  MIDI_CONTROLS.EXPR,
+]);
 
 export class MidiMapper {
   map(event) {
-    if (event.type !== "cc") return null;
+    if (!event || event.type !== "cc") return null;
 
     const control = FS_CC_MAP[event.cc];
 
