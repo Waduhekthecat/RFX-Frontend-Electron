@@ -45,8 +45,8 @@ function TunerControlButton({ badge, active, inactiveClasses, activeClasses, onP
             onKeyUp={onKeyUp}
             aria-pressed={active}
             aria-label={`${badge.footswitch} ${badge.command}`}
-            className={`rounded-xl border px-3 py-2 h-full min-h-[96px] text-left transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/70 ${active ? activeClasses : inactiveClasses}`}    >
-            <div className="mt-2 text-sm font-semibold leading-snug text-white/50">
+            className={`flex h-full min-h-[96px] flex-col items-center justify-center rounded-xl border px-3 py-2 text-center transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/70 ${active ? activeClasses : inactiveClasses}`}    >
+            <div className="text-sm font-semibold leading-snug text-white/50">
                 <span>{badge.footswitch}</span>
             </div>
 
