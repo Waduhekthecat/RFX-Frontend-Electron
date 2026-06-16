@@ -11,7 +11,6 @@ export class MidiCommandBridge {
 
     handleMappedControl(mappedEvent) {
         if (!mappedEvent || mappedEvent.type !== "mapped-control") return;
-        if (mappedEvent.eventType === MIDI_EVENT_TYPES.RELEASE) return;
 
         const mode = this.modeManager.getMode();
 
@@ -27,6 +26,8 @@ export class MidiCommandBridge {
             this.handlePerformMode(mappedEvent);
             return;
         }
+
+        if (mappedEvent.eventType === MIDI_EVENT_TYPES.RELEASE) return;
 
         if (mode === RFX_MODES.TUNER) {
             this.handleTunerMode(mappedEvent);
@@ -45,6 +46,11 @@ export class MidiCommandBridge {
     }
 
     handlePerformMode({ control, eventType, normalizedValue }) {
+        if (eventType === MIDI_EVENT_TYPES.RELEASE) {
+            console.log("[MIDI] Perform release ignored:", control);
+            return;
+        }
+
         if (eventType === MIDI_EVENT_TYPES.CONTINUOUS) {
             this.dispatchCommand("EXPRESSION_CONTROL", {
                 expression: control,
@@ -56,54 +62,55 @@ export class MidiCommandBridge {
 
         switch (control) {
             case MIDI_CONTROLS.FS_A:
-                this.dispatchCommand("selectActiveBus", {
+                this.dispatchCommand({
+                    name: "selectActiveBus",
                     busId: "FX_1",
-                    source: "midi",
-                    control,
                 });
                 break;
 
             case MIDI_CONTROLS.FS_B:
-                this.dispatchCommand("selectActiveBus", {
+                this.dispatchCommand({
+                    name: "selectActiveBus",
                     busId: "FX_2",
-                    source: "midi",
-                    control,
                 });
                 break;
 
             case MIDI_CONTROLS.FS_C:
-                this.dispatchCommand("selectActiveBus", {
+                this.dispatchCommand({
+                    name: "selectActiveBus",
                     busId: "FX_3",
-                    source: "midi",
-                    control,
                 });
                 break;
 
             case MIDI_CONTROLS.FS_D:
-                this.dispatchCommand("selectActiveBus", {
+                this.dispatchCommand({
+                    name: "selectActiveBus",
                     busId: "FX_4",
-                    source: "midi",
-                    control,
                 });
                 break;
 
             case MIDI_CONTROLS.FS_A_LONG:
                 this.modeManager.setMode(RFX_MODES.TUNER);
-                this.dispatchCommand("ENTER_TUNER_MODE", { source: "midi", control });
+                this.dispatchCommand("ENTER_TUNER_MODE", {
+                    source: "midi",
+                    control,
+                });
                 break;
 
             case MIDI_CONTROLS.FS_C_LONG:
                 this.modeManager.setMode(RFX_MODES.AUTOMATION);
-                this.dispatchCommand("ENTER_AUTOMATION_MODE", { source: "midi", control });
+                this.dispatchCommand("ENTER_AUTOMATION_MODE", {
+                    source: "midi",
+                    control,
+                });
                 break;
 
             case MIDI_CONTROLS.FS_D_LONG:
                 this.modeManager.setMode(RFX_MODES.LOOPER);
-                this.dispatchCommand("ENTER_LOOPER_MODE", { source: "midi", control });
-                break;
-
-            case MIDI_CONTROLS.FS_B_RELEASE:
-                console.log("[MIDI] FS_B_RELEASE intentionally reserved/unassigned.");
+                this.dispatchCommand("ENTER_LOOPER_MODE", {
+                    source: "midi",
+                    control,
+                });
                 break;
 
             default:
@@ -114,7 +121,10 @@ export class MidiCommandBridge {
     handleTunerMode({ control }) {
         if (control === MIDI_CONTROLS.FS_A_LONG) {
             this.modeManager.setMode(RFX_MODES.PERFORM);
-            this.dispatchCommand("EXIT_TUNER_MODE", { source: "midi", control });
+            this.dispatchCommand("EXIT_TUNER_MODE", {
+                source: "midi",
+                control,
+            });
             return;
         }
 
@@ -124,20 +134,32 @@ export class MidiCommandBridge {
     handleLooperMode({ control }) {
         switch (control) {
             case MIDI_CONTROLS.FS_A:
-                this.dispatchCommand("LOOPER_STOP_AND_RETURN", { source: "midi", control });
+                this.dispatchCommand("LOOPER_STOP_AND_RETURN", {
+                    source: "midi",
+                    control,
+                });
                 break;
 
             case MIDI_CONTROLS.FS_A_LONG:
-                this.dispatchCommand("LOOPER_CLEAR", { source: "midi", control });
+                this.dispatchCommand("LOOPER_CLEAR", {
+                    source: "midi",
+                    control,
+                });
                 break;
 
             case MIDI_CONTROLS.FS_D:
-                this.dispatchCommand("LOOPER_RECORD_OR_FINISH", { source: "midi", control });
+                this.dispatchCommand("LOOPER_RECORD_OR_FINISH", {
+                    source: "midi",
+                    control,
+                });
                 break;
 
             case MIDI_CONTROLS.FS_D_LONG:
                 this.modeManager.setMode(RFX_MODES.PERFORM);
-                this.dispatchCommand("EXIT_LOOPER_MODE", { source: "midi", control });
+                this.dispatchCommand("EXIT_LOOPER_MODE", {
+                    source: "midi",
+                    control,
+                });
                 break;
 
             default:
@@ -157,20 +179,32 @@ export class MidiCommandBridge {
 
         switch (control) {
             case MIDI_CONTROLS.FS_A:
-                this.dispatchCommand("AUTOMATION_PLAY_OR_STOP", { source: "midi", control });
+                this.dispatchCommand("AUTOMATION_PLAY_OR_STOP", {
+                    source: "midi",
+                    control,
+                });
                 break;
 
             case MIDI_CONTROLS.FS_A_LONG:
-                this.dispatchCommand("AUTOMATION_CLEAR", { source: "midi", control });
+                this.dispatchCommand("AUTOMATION_CLEAR", {
+                    source: "midi",
+                    control,
+                });
                 break;
 
             case MIDI_CONTROLS.FS_D:
-                this.dispatchCommand("AUTOMATION_RECORD_OR_FINISH", { source: "midi", control });
+                this.dispatchCommand("AUTOMATION_RECORD_OR_FINISH", {
+                    source: "midi",
+                    control,
+                });
                 break;
 
             case MIDI_CONTROLS.FS_C_LONG:
                 this.modeManager.setMode(RFX_MODES.PERFORM);
-                this.dispatchCommand("EXIT_AUTOMATION_MODE", { source: "midi", control });
+                this.dispatchCommand("EXIT_AUTOMATION_MODE", {
+                    source: "midi",
+                    control,
+                });
                 break;
 
             default:
