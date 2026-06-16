@@ -57,7 +57,9 @@ function LooperControlButton({
             onKeyUp={onKeyUp}
             aria-pressed={active}
             aria-label={`${badge.footswitch} ${badge.command}`}
-            className={`rounded-xl border px-3 py-3 min-h-[112px] text-left transition-all duration-150 hover:border-white/30 hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-emerald-300/70 ${active ? activeClasses : "border-white/10 bg-black/20"
+            className={`rounded-xl border px-3 py-3 min-h-[112px] text-left transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/70 ${active
+                    ? activeClasses
+                    : "border-white/10 bg-black/20 hover:border-white/30 hover:bg-white/10"                
                 }`}
         >
             <div className="flex items-center justify-between gap-2 text-[11px] uppercase tracking-[0.18em] text-white/50">
@@ -229,12 +231,14 @@ export function LooperView() {
         }, EXPRESSION_IDLE_MS);
     }, []);
 
-        const handleLooperControl = useCallback((control, value = 127, { flashMomentary = true } = {}) => {        if (control === MIDI_CONTROLS.EXPR) {
+       const handleLooperControl = useCallback((control, value = 127, { flashMomentary = true } = {}) => {
+        if (control === MIDI_CONTROLS.EXPR) {
             activateExpression(midiValueToPlaybackMasterVolume(value));
             return;
         }
 
         if (!badgesByControl.has(control)) return;
+        if (value <= 0) return;
 
         if (control === MIDI_CONTROLS.FS_A) {
             setIsLoopPlaying(false);
@@ -321,20 +325,13 @@ export function LooperView() {
 
 
     const pressLooperControl = useCallback((control) => {
-        if (MOMENTARY_CONTROLS.has(control)) {
-            clearControlTimer(control);
-            setControlActive(control, true);
-        }
+        handleLooperControl(control, 127, { flashMomentary: true });
+    }, [handleLooperControl]);
 
-        handleLooperControl(control, 127, { flashMomentary: false });
-    }, [clearControlTimer, handleLooperControl, setControlActive]);
-
-    const releaseLooperControl = useCallback((control) => {
-        if (MOMENTARY_CONTROLS.has(control)) {
-            clearControlTimer(control);
-            setControlActive(control, false);
-        }
-    }, [clearControlTimer, setControlActive]);
+    const releaseLooperControl = useCallback(() => {
+        // Mouse and keyboard releases should not clear flashed controls. The MIDI
+        // footswitch sends a separate FS_B_RELEASE command when recording stops.
+    }, []);
 
     const handleControlKeyDown = useCallback((event, control) => {
         if (event.repeat) return;
