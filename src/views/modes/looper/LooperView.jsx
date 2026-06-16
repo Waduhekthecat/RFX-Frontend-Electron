@@ -186,22 +186,22 @@ function LooperTimeline({
                     <button
                         type="button"
                         onClick={onTapTempo}
-                        className={`h-full min-h-[72px] rounded-xl border px-5 py-3 text-base font-semibold text-white transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-300/70 ${isTapTempoActive ? CONTROL_COLORS.blueActive : CONTROL_COLORS.blueFaint}`}                    >
-                        TAP
+                        className={`h-full min-h-[72px] w-[92px] shrink-0 rounded-xl border px-5 py-3 text-base font-semibold text-white transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-300/70 ${isTapTempoActive ? CONTROL_COLORS.blueActive : CONTROL_COLORS.blueFaint}`}
+                    >TAP
                     </button>
                     <button
                         type="button"
                         onClick={onToggleClick}
                         aria-pressed={isClickEnabled}
-                        className={`h-full min-h-[72px] rounded-xl border px-5 py-3 text-sm font-semibold text-white transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70 ${isClickEnabled ? CONTROL_COLORS.amberActive : CONTROL_COLORS.grayFaint}`}                    >
-                        CLICK {isClickEnabled ? "ON" : "OFF"}
+                        className={`h-full min-h-[72px] w-[116px] shrink-0 rounded-xl border px-5 py-3 text-sm font-semibold text-white transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70 ${isClickEnabled ? CONTROL_COLORS.amberActive : CONTROL_COLORS.grayFaint}`}
+                    >CLICK {isClickEnabled ? "ON" : "OFF"}
                     </button>
                     <button
                         type="button"
                         onClick={onToggleCountIn}
                         aria-pressed={isCountInEnabled}
-                        className={`h-full min-h-[72px] rounded-xl border px-5 py-3 text-sm font-semibold text-white transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-300/70 ${isCountInEnabled ? CONTROL_COLORS.purpleActive : CONTROL_COLORS.grayFaint}`}                    >
-                        COUNT-IN {isCountInEnabled ? "ON" : "OFF"}
+                        className={`h-full min-h-[72px] w-[148px] shrink-0 rounded-xl border px-5 py-3 text-sm font-semibold text-white transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-300/70 ${isCountInEnabled ? CONTROL_COLORS.purpleActive : CONTROL_COLORS.grayFaint}`}
+                    >COUNT-IN {isCountInEnabled ? "ON" : "OFF"}
                     </button>
                 </div>
 
