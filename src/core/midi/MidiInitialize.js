@@ -5,6 +5,10 @@ import { ModeManager } from "../modes/ModeManager.js";
 
 let midiRuntime = null;
 
+export function getMidiRuntime() {
+  return midiRuntime;
+}
+
 export function initMidi({ dispatchCommand } = {}) {
   if (midiRuntime) return midiRuntime;
 

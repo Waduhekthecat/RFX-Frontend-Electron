@@ -1,7 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Panel, Inset } from "../../../components/ui/Panel";
 import { MIDI_CONTROLS } from "../../../core/midi/MidiMapper";
 import { Knob } from "../../../components/controls/knobs/Knob";
+import { getMidiRuntime } from "../../../core/midi/MidiInitialize";
+import { RFX_MODES } from "../../../core/modes/Modes";
 
 const MOMENTARY_ACTIVE_MS = 350;
 const EXPRESSION_IDLE_MS = 250;
@@ -81,14 +84,14 @@ function LooperControlButton({
 }
 
 function LooperTimeline({ isRecording, isOverdubbing, hasRecordedLoop, isPlaying, loopDurationMs, loopPositionMs }) {
-        const progress = hasRecordedLoop && loopDurationMs > 0
+    const progress = hasRecordedLoop && loopDurationMs > 0
         ? Math.min(loopPositionMs / loopDurationMs, 1)
         : 0;
 
     const status = isOverdubbing
         ? "Overdubbing"
         : isRecording
-        ? "Counting"
+            ? "Counting"
             : isPlaying
                 ? "Playing loop"
                 : hasRecordedLoop
@@ -129,7 +132,9 @@ function LooperTimeline({ isRecording, isOverdubbing, hasRecordedLoop, isPlaying
                 </div>
             </div>
 
-            <div className="mt-6 flex h-[130px] items-end gap-1 rounded-xl border border-white/10 bg-black/30 p-3">
+            <div
+                className={`mt-6 flex h-[130px] items-end gap-1 rounded-xl border border-white/10 bg-black/30 p-3 ${isRecording ? "rfx-recording-waveform" : ""}`}
+            >
                 {bars.map((height, index) => (
                     <div
                         key={index}
@@ -153,6 +158,7 @@ function LooperTimeline({ isRecording, isOverdubbing, hasRecordedLoop, isPlaying
 }
 
 export function LooperView() {
+    const navigate = useNavigate();
     const [activeControls, setActiveControls] = useState(() => new Set());
     const [playbackMasterVolume, setPlaybackMasterVolume] = useState(0);
     const [isExpressionActive, setIsExpressionActive] = useState(false);
@@ -283,6 +289,11 @@ export function LooperView() {
             setLooperTypeIndex((index) => (index + 1) % LOOPER_TYPES.length);
         }
 
+        if (control === MIDI_CONTROLS.FS_D_LONG) {
+            getMidiRuntime()?.modeManager?.setMode(RFX_MODES.PERFORM);
+            navigate("/");
+        }
+
         if (control === MIDI_CONTROLS.FS_B) {
             clearControlTimer(MIDI_CONTROLS.FS_B);
             setControlActive(MIDI_CONTROLS.FS_B, true);
@@ -294,7 +305,7 @@ export function LooperView() {
                 setIsOverdubbing(false);
                 setIsLoopPlaying(false);
                 setLoopPositionMs(0);
-                } else if (hasRecordedLoop) {
+            } else if (hasRecordedLoop) {
                 playbackStartRef.current = playbackStartRef.current ?? performance.now();
                 setIsOverdubbing(true);
                 setIsLoopPlaying(true);
@@ -320,7 +331,7 @@ export function LooperView() {
                 setIsLoopPlaying(true);
                 recordingStartRef.current = null;
                 playbackStartRef.current = performance.now();
-                } else if (isOverdubbing) {
+            } else if (isOverdubbing) {
                 setIsOverdubbing(false);
             }
 
@@ -341,6 +352,7 @@ export function LooperView() {
         hasRecordedLoop,
         isOverdubbing,
         isRecordingFirstLoop,
+        navigate,
         setControlActive,
     ]);
 

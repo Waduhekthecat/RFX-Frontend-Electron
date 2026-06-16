@@ -11,11 +11,12 @@ body,
   margin: 0;
   padding: 0;
 }
+
 body {
-display: flex;
-align-items: center;
-justify-content: center;
-background: #0b0d12;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0b0d12;
 }
 
 /* ============================= */
@@ -25,73 +26,76 @@ background: #0b0d12;
 Keep this as-is so nothing changes elsewhere in the app. */
 
 .rfxSimpleBar .simplebar-track.simplebar-vertical {
-width: 60px;                 /* gutter width */
-right: 0;
-background: rgba(0, 0, 0, 0.35);
-border-left: 1px solid rgba(255, 255, 255, 0.06);
-box-shadow:
-inset 0 0 0 1px rgba(0,0,0,0.35),
-inset 0 10px 30px rgba(0,0,0,0.45);
-border-radius: 18px;
+  width: 60px;
+  /* gutter width */
+  right: 0;
+  background: rgba(0, 0, 0, 0.35);
+  border-left: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow:
+    inset 0 0 0 1px rgba(0, 0, 0, 0.35),
+    inset 0 10px 30px rgba(0, 0, 0, 0.45);
+  border-radius: 18px;
 }
 
 /* keep content from being covered by the big gutter */
 .rfxSimpleBar .simplebar-content-wrapper {
-padding-right: 60px;
+  padding-right: 60px;
 }
 
 /* The actual moving scrollbar element: give it a fixed width and center it */
 .rfxSimpleBar .simplebar-scrollbar {
-width: 50px;                 /* thumb width */
-left: 5px;                   /* center within track */
-transform: translateX(-10%);
+  width: 50px;
+  /* thumb width */
+  left: 5px;
+  /* center within track */
+  transform: translateX(-10%);
 }
 
 /* Thumb body */
 .rfxSimpleBar .simplebar-scrollbar:before {
-content: "";
-position: absolute;
-/* height: 120px !important; */
-left: 0;
-right: 0;
-top: 8px;
-bottom: 8px;
-border-radius: 14px;
+  content: "";
+  position: absolute;
+  /* height: 120px !important; */
+  left: 0;
+  right: 0;
+  top: 8px;
+  bottom: 8px;
+  border-radius: 14px;
 
-background: linear-gradient(
-180deg,
-rgba(255,255,255,0.35) 0%,
-rgba(255,255,255,0.18) 45%,
-rgba(255,255,255,0.10) 100%
-);
-box-shadow:
-0 0 0 1px rgba(255,255,255,0.10),
-inset 0 1px 0 rgba(255,255,255,0.18),
-inset 0 -10px 18px rgba(0,0,0,0.45);
+  background: linear-gradient(180deg,
+      rgba(255, 255, 255, 0.35) 0%,
+      rgba(255, 255, 255, 0.18) 45%,
+      rgba(255, 255, 255, 0.10) 100%);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.10),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    inset 0 -10px 18px rgba(0, 0, 0, 0.45);
 
-opacity: 1 !important;
+  opacity: 1 !important;
 }
 
 /* Grip lines: 3 horizontal bars centered vertically */
 .rfxSimpleBar .simplebar-scrollbar:after {
-content: "";
-position: absolute;
-left: 50%;
-top: 50%;
-width: 25px;                 /* grip width */
-height: 5px;                 /* thickness of one line */
-transform: translate(-50%, -50%);
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 25px;
+  /* grip width */
+  height: 5px;
+  /* thickness of one line */
+  transform: translate(-50%, -50%);
 
-/* Three lines via box-shadow */
-background: rgba(0,0,0,0.55);
-border-radius: 2px;
-box-shadow:
-0 -7px 0 rgba(0,0,0,0.55),
-0  7px 0 rgba(0,0,0,0.55);
+  /* Three lines via box-shadow */
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 2px;
+  box-shadow:
+    0 -7px 0 rgba(0, 0, 0, 0.55),
+    0 7px 0 rgba(0, 0, 0, 0.55);
 
-/* subtle highlight to match your glossy vibe */
-filter: drop-shadow(0 1px 0 rgba(255,255,255,0.10));
-pointer-events: none;
+  /* subtle highlight to match your glossy vibe */
+  filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.10));
+  pointer-events: none;
 }
 
 /* ============================= */
@@ -102,49 +106,52 @@ Use: className="rfxSimpleBar rfxSimpleBar--picker"
 This does NOT affect existing scrollbars. */
 
 .rfxSimpleBar.rfxSimpleBar--picker .simplebar-track.simplebar-vertical {
-width: 18px;                 /* smaller track */
-right: 8px;                  /* inset a bit */
-background: rgba(255, 255, 255, 0.04);
-border-left: 1px solid rgba(255, 255, 255, 0.06);
-box-shadow:
-inset 0 0 0 1px rgba(0,0,0,0.35),
-inset 0 10px 30px rgba(0,0,0,0.25);
-border-radius: 999px;
+  width: 18px;
+  /* smaller track */
+  right: 8px;
+  /* inset a bit */
+  background: rgba(255, 255, 255, 0.04);
+  border-left: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow:
+    inset 0 0 0 1px rgba(0, 0, 0, 0.35),
+    inset 0 10px 30px rgba(0, 0, 0, 0.25);
+  border-radius: 999px;
 }
 
 /* Don’t reserve 60px for picker lists */
 .rfxSimpleBar.rfxSimpleBar--picker .simplebar-content-wrapper {
-padding-right: 22px;         /* enough so content won’t sit under the track */
+  padding-right: 22px;
+  /* enough so content won’t sit under the track */
 }
 
 /* Smaller thumb in picker */
 .rfxSimpleBar.rfxSimpleBar--picker .simplebar-scrollbar {
-width: 12px;
-left: 3px;
-transform: none;
+  width: 12px;
+  left: 3px;
+  transform: none;
 }
 
 /* Simpler (less “grippy”) thumb for picker: more readable, less visual noise */
 .rfxSimpleBar.rfxSimpleBar--picker .simplebar-scrollbar:before {
-top: 4px;
-bottom: 4px;
-border-radius: 999px;
+  top: 4px;
+  bottom: 4px;
+  border-radius: 999px;
 
-background: rgba(255,255,255,0.26);
-box-shadow:
-0 0 0 1px rgba(255,255,255,0.10),
-inset 0 1px 0 rgba(255,255,255,0.10);
-opacity: 1 !important;
+  background: rgba(255, 255, 255, 0.26);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.10),
+    inset 0 1px 0 rgba(255, 255, 255, 0.10);
+  opacity: 1 !important;
 }
 
 /* Remove grip lines in picker mode (they get tiny + noisy) */
 .rfxSimpleBar.rfxSimpleBar--picker .simplebar-scrollbar:after {
-content: none;
+  content: none;
 }
 
 /* Slightly brighter thumb on hover/active for discoverability */
 .rfxSimpleBar.rfxSimpleBar--picker .simplebar-track.simplebar-vertical:hover .simplebar-scrollbar:before {
-background: rgba(255,255,255,0.36);
+  background: rgba(255, 255, 255, 0.36);
 }
 
 /* ============================= */
@@ -156,16 +163,34 @@ background: rgba(255,255,255,0.36);
   -moz-user-select: none;
   -ms-user-select: none;
   user-select: none;
-  }
+}
 
 img {
--webkit-user-drag: none;
-user-select: none;
--webkit-user-select: none;
+  -webkit-user-drag: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 /* Optional but recommended for touchscreen feel */
 
 * {
   -webkit-tap-highlight-color: transparent;
+}
+
+/* Looper waveform blink animation */
+@keyframes rfxRecordingWaveformBlink {
+  0%,
+  100% {
+    filter: brightness(1.15) saturate(1.08);
+    opacity: 1;
   }
+
+  50% {
+    filter: brightness(0.62) saturate(0.82);
+    opacity: 0.58;
+  }
+}
+
+.rfx-recording-waveform {
+  animation: rfxRecordingWaveformBlink 2.8s ease-in-out infinite;
+}

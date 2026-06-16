@@ -3,6 +3,8 @@ import { NavLink } from "react-router-dom";
 import { useTransportVM } from "../../core/useTransportVM";
 import { normalizeMode } from "../../core/DomainHelpers";
 import { styles, cx } from "./_styles";
+import { getMidiRuntime } from "../../core/midi/MidiInitialize";
+import { RFX_MODES } from "../../core/modes/Modes";
 
 const BASE_TABS = [
   { label: "Perform", to: "/" },
@@ -59,6 +61,10 @@ export function Nav() {
     return [...BASE_TABS, ...devTab];
   }, []);
 
+  const setAppMode = React.useCallback((nextMode) => {
+    getMidiRuntime()?.modeManager?.setMode(nextMode);
+  }, []);
+
   const activeBusId = vm.activeBusId || "FX_1";
   const mode = normalizeMode(vm.busModes?.[activeBusId] || "linear");
 
@@ -85,6 +91,10 @@ export function Nav() {
             <NavLink
               key={t.to}
               to={t.to}
+              onClick={() => {
+                if (t.to === "/looper") setAppMode(RFX_MODES.LOOPER);
+                if (t.to === "/") setAppMode(RFX_MODES.PERFORM);
+              }}
               className={({ isActive }) =>
                 cx(
                   styles.tabBase,
