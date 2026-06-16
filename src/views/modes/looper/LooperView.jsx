@@ -177,7 +177,7 @@ function LooperTimeline({
                     </div>
                 </div>
 
-                <div className="flex items-center justify-center gap-2 pt-1">
+                <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
                     <div className={`rounded-full border px-3 py-1 text-sm font-semibold tabular-nums text-sky-100 ${CONTROL_COLORS.blueFaint}`}>
                         {tempoBpm} BPM
                     </div>
@@ -188,27 +188,25 @@ function LooperTimeline({
                     >
                         TAP
                     </button>
+                    <button
+                        type="button"
+                        onClick={onToggleClick}
+                        aria-pressed={isClickEnabled}
+                        className={`rounded-full border px-3 py-1 text-xs font-semibold text-white transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70 ${isClickEnabled ? CONTROL_COLORS.amberActive : CONTROL_COLORS.grayFaint}`}
+                    >
+                        CLICK {isClickEnabled ? "ON" : "OFF"}
+                    </button>
+                    <button
+                        type="button"
+                        onClick={onToggleCountIn}
+                        aria-pressed={isCountInEnabled}
+                        className={`rounded-full border px-3 py-1 text-xs font-semibold text-white transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-300/70 ${isCountInEnabled ? CONTROL_COLORS.purpleActive : CONTROL_COLORS.grayFaint}`}
+                    >
+                        COUNT-IN {isCountInEnabled ? "ON" : "OFF"}
+                    </button>
                 </div>
 
                 <div className="flex min-w-0 items-start justify-end gap-3">
-                    <div className="flex flex-wrap justify-end gap-2 pt-1">
-                        <button
-                            type="button"
-                            onClick={onToggleClick}
-                            aria-pressed={isClickEnabled}
-                            className={`rounded-full border px-3 py-1 text-xs font-semibold text-white transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70 ${isClickEnabled ? CONTROL_COLORS.amberActive : CONTROL_COLORS.grayFaint}`}
-                        >
-                            CLICK {isClickEnabled ? "ON" : "OFF"}
-                        </button>
-                        <button
-                            type="button"
-                            onClick={onToggleCountIn}
-                            aria-pressed={isCountInEnabled}
-                            className={`rounded-full border px-3 py-1 text-xs font-semibold text-white transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-300/70 ${isCountInEnabled ? CONTROL_COLORS.purpleActive : CONTROL_COLORS.grayFaint}`}
-                        >
-                            COUNT-IN {isCountInEnabled ? "ON" : "OFF"}
-                        </button>
-                    </div>
                     
                     <div className="shrink-0 text-right">
                         <div className="text-[11px] uppercase tracking-[0.18em] text-white/40">
