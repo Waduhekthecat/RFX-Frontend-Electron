@@ -230,7 +230,7 @@ function LooperTimeline({
                 {bars.map((height, index) => (
                     <div
                         key={index}
-                        className={`flex-1 rounded-full transition-colors duration-150 ${index / bars.length <= progress || shouldBlinkWaveform
+                        className={`flex-1 rounded-full transition-colors duration-150 ${(hasRecordedLoop && index / bars.length <= progress) || shouldBlinkWaveform
                             ? "bg-emerald-300/80"
                             : "bg-white/15"
                             }`}
