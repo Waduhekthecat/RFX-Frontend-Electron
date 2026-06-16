@@ -14,6 +14,11 @@ import {
   makeTrackPanKey,
 } from "./Continuous";
 
+function asLooperType(v) {
+  const raw = asStr(v?.looperType ?? v?.session?.looperType, "");
+  return raw || null;
+}
+
 const MAX_EVENT_LOG = 300;
 const MAX_TARGETS_PER_KNOB = 3;
 const EMPTY_ARR = Object.freeze([]);
@@ -322,6 +327,7 @@ export const useRfxStore = create((set, get) => ({
     activeTrackGuid: null,
     selectedTrackGuid: null,
     selectedFxGuid: null,
+    looperType: "post-fx",
   },
 
   ops: {
@@ -374,6 +380,18 @@ export const useRfxStore = create((set, get) => ({
 
   clearEventLog: () => {
     set((s) => ({ ops: { ...s.ops, eventLog: [] } }));
+  },
+
+  setLooperType: (looperType) => {
+    const nextLooperType = String(looperType || "");
+    if (!nextLooperType) return;
+
+    set((s) => ({
+      session: {
+        ...s.session,
+        looperType: nextLooperType,
+      },
+    }));
   },
 
   selectTrackEffective: (trackGuid) => {
@@ -545,6 +563,7 @@ export const useRfxStore = create((set, get) => ({
         ...s.session,
         activeTrackGuid: activeGuid,
         selectedTrackGuid: selectedGuid,
+        looperType: norm.session?.looperType || s.session.looperType || "post-fx",
       },
 
       ops: {

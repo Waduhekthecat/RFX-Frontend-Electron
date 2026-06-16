@@ -13,6 +13,11 @@ function ensureSelectionIndex(n) {
   return Number.isFinite(v) ? v : -1;
 }
 
+function asLooperType(v) {
+  const raw = asStr(v?.looperType ?? v?.session?.looperType, "");
+  return raw || null;
+}
+
 export function normalize(view) {
   const v = view || {};
 
@@ -200,6 +205,7 @@ export function normalize(view) {
 
       session: {
         activeBusId,
+        looperType: asLooperType(v),
       },
 
       entities: {
@@ -249,6 +255,7 @@ export function normalize(view) {
 
   const session = {
     activeBusId: asStr(v?.session?.activeBusId, ""),
+    looperType: asLooperType(v),
   };
 
   const tracks = Array.isArray(v?.tracks) ? v.tracks : [];

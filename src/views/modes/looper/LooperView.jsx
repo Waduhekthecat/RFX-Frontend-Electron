@@ -5,25 +5,50 @@ import { MIDI_CONTROLS } from "../../../core/midi/MidiMapper";
 import { Knob } from "../../../components/controls/knobs/Knob";
 import { getMidiRuntime } from "../../../core/midi/MidiInitialize";
 import { RFX_MODES } from "../../../core/modes/Modes";
+import { useRfxStore } from "../../../core/rfx/Store";
 
 const MOMENTARY_ACTIVE_MS = 350;
 const EXPRESSION_IDLE_MS = 250;
 const LOOP_PREVIEW_TICK_MS = 33;
 
 const LOOPER_TYPES = [
-    { label: "Post-FX", classes: "border-fuchsia-300 bg-fuchsia-400/20 shadow-[0_0_18px_rgba(217,70,239,0.35)]" },
-    { label: "Pre-FX", classes: "border-amber-300 bg-amber-400/20 shadow-[0_0_18px_rgba(251,191,36,0.35)]" },
+    {
+        id: "post-fx",
+        label: "Post-FX",
+        classes: "border-fuchsia-300 bg-fuchsia-400/20 shadow-[0_0_18px_rgba(217,70,239,0.35)]",
+        faintClasses: "border-fuchsia-300/25 bg-fuchsia-400/5 hover:border-fuchsia-300/45 hover:bg-fuchsia-400/15",
+    },
+    {
+        id: "pre-fx",
+        label: "Pre-FX",
+        classes: "border-amber-300 bg-amber-400/20 shadow-[0_0_18px_rgba(251,191,36,0.35)]",
+        faintClasses: "border-amber-300/25 bg-amber-400/5 hover:border-amber-300/45 hover:bg-amber-400/15",
+    },
 ];
 
+const CONTROL_COLORS = {
+    greenFaint: "border-emerald-300/25 bg-emerald-400/5 hover:border-emerald-300/45 hover:bg-emerald-400/15",
+    greenActive: "border-emerald-300 bg-emerald-400/20 shadow-[0_0_18px_rgba(52,211,153,0.35)]",
+
+    redFaint: "border-red-300/25 bg-red-400/5 hover:border-red-300/45 hover:bg-red-400/15",
+    redActive: "border-red-300 bg-red-400/25 shadow-[0_0_20px_rgba(248,113,113,0.45)]",
+
+    orangeFaint: "border-orange-300/25 bg-orange-400/5 hover:border-orange-300/45 hover:bg-orange-400/15",
+    orangeActive: "border-orange-300 bg-orange-400/25 shadow-[0_0_20px_rgba(251,146,60,0.45)]",
+
+    blueFaint: "border-sky-300/25 bg-sky-400/5",
+    blueActive: "border-sky-300 bg-sky-400/20 shadow-[0_0_18px_rgba(56,189,248,0.35)]",
+};
+
 const LOOPER_DEBUG_BADGES = [
-    { cc: 11, control: MIDI_CONTROLS.FS_A, footswitch: "FS_A", command: "Stop Playback" },
-    { cc: 12, control: MIDI_CONTROLS.FS_B, footswitch: "FS_B", command: "Start Record" },
-    { cc: 13, control: MIDI_CONTROLS.FS_C, footswitch: "FS_C", command: "Start Playback" },
-    { cc: 14, control: MIDI_CONTROLS.FS_D, footswitch: "FS_D", command: "Toggle Looper Type" },
-    { cc: 101, control: MIDI_CONTROLS.FS_A_LONG, footswitch: "FS_A", command: "Delete Loop Audio" },
-    { cc: 102, control: MIDI_CONTROLS.FS_B_RELEASE, footswitch: "FS_B", command: "Stop Record / Start Playback" },
-    { cc: 103, control: MIDI_CONTROLS.FS_C_LONG, footswitch: "FS_C", command: "Unavailable/Future" },
-    { cc: 104, control: MIDI_CONTROLS.FS_D_LONG, footswitch: "FS_D", command: "Exit Looper Mode" },
+    { cc: 11, control: MIDI_CONTROLS.FS_A, footswitch: "Tap FS_A", command: "Stop Playback", color: "green" },
+    { cc: 12, control: MIDI_CONTROLS.FS_B, footswitch: "Hold FS_B", command: "Start Record", color: "green" },
+    { cc: 13, control: MIDI_CONTROLS.FS_C, footswitch: "Tap FS_C", command: "Start Playback", color: "green" },
+    { cc: 14, control: MIDI_CONTROLS.FS_D, footswitch: "Tap FS_D", command: "Toggle Looper Type", color: "looperType" },
+    { cc: 101, control: MIDI_CONTROLS.FS_A_LONG, footswitch: "Hold FS_A", command: "Delete Loop Audio", color: "green" },
+    { cc: 102, control: MIDI_CONTROLS.FS_B_RELEASE, footswitch: "Release FS_B", command: "Stop Record / Start Playback", color: "red" },
+    { cc: 103, control: MIDI_CONTROLS.FS_C_LONG, footswitch: "Hold FS_C", command: "Undo Last Record", color: "green" },
+    { cc: 104, control: MIDI_CONTROLS.FS_D_LONG, footswitch: "Hold FS_D", command: "Exit Looper Mode", color: "orange" },
 ];
 
 const MOMENTARY_CONTROLS = new Set([
@@ -39,6 +64,7 @@ const MOMENTARY_CONTROLS = new Set([
 const clamp01 = (value = 0) => Math.max(0, Math.min(value, 1));
 const midiValueToPlaybackMasterVolume = (value = 0) => clamp01(value / 127);
 const formatPlaybackMasterVolume = (value01 = 0) => (clamp01(value01) * 10).toFixed(1);
+
 const formatStopwatchTime = (milliseconds = 0) => {
     const totalSeconds = Math.floor(Math.max(milliseconds, 0) / 1000);
     const minutes = Math.floor(totalSeconds / 60);
@@ -47,14 +73,16 @@ const formatStopwatchTime = (milliseconds = 0) => {
 
     return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${tenths}`;
 };
+
 function LooperControlButton({
     badge,
     active,
+    inactiveClasses,
+    activeClasses,
     onPointerDown,
     onPointerUp,
     onKeyDown,
     onKeyUp,
-    activeClasses = "border-emerald-300 bg-emerald-400/20 shadow-[0_0_18px_rgba(52,211,153,0.35)]",
 }) {
     return (
         <button
@@ -67,15 +95,14 @@ function LooperControlButton({
             onKeyUp={onKeyUp}
             aria-pressed={active}
             aria-label={`${badge.footswitch} ${badge.command}`}
-            className={`rounded-xl border px-3 py-3 min-h-[112px] text-left transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/70 ${active
-                ? activeClasses
-                : "border-white/10 bg-black/20 hover:border-white/30 hover:bg-white/10"
-                }`}
+            className={`rounded-xl border px-3 py-3 h-full min-h-[150px] text-left transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/70 ${
+                active ? activeClasses : inactiveClasses
+            }`}
         >
-            <div className="flex items-center justify-between gap-2 text-[11px] uppercase tracking-[0.18em] text-white/50">
-                <span>CC {badge.cc}</span>
+            <div className="mt-3 text-sm font-semibold leading-snug text-white/50">
                 <span>{badge.footswitch}</span>
             </div>
+
             <div className="mt-3 text-sm font-semibold leading-snug text-white">
                 {badge.command}
             </div>
@@ -83,26 +110,37 @@ function LooperControlButton({
     );
 }
 
-function LooperTimeline({ isRecording, isOverdubbing, hasRecordedLoop, isPlaying, loopDurationMs, loopPositionMs }) {
-    const progress = hasRecordedLoop && loopDurationMs > 0
-        ? Math.min(loopPositionMs / loopDurationMs, 1)
-        : 0;
+function LooperTimeline({
+    isRecording,
+    isOverdubbing,
+    hasRecordedLoop,
+    isPlaying,
+    loopDurationMs,
+    loopPositionMs,
+}) {
+    const progress =
+        hasRecordedLoop && loopDurationMs > 0
+            ? Math.min(loopPositionMs / loopDurationMs, 1)
+            : 0;
 
     const status = isOverdubbing
         ? "Overdubbing"
         : isRecording
-            ? "Counting"
+            ? "Recording"
             : isPlaying
-                ? "Playing loop"
+                ? "Playing Loop"
                 : hasRecordedLoop
-                    ? "Loop armed"
-                    : "Waiting for first record trigger";
+                    ? "Loop Playback Stopped"
+                    : "Start Record";
 
-    const durationLabel = isRecording && !hasRecordedLoop
-        ? formatStopwatchTime(loopPositionMs)
-        : hasRecordedLoop
-            ? `${(loopDurationMs / 1000).toFixed(2)}s loop`
-            : "No loop captured";
+    const durationLabel = isRecording || hasRecordedLoop ? "Duration" : "";
+
+    const durationContent =
+        isRecording && !hasRecordedLoop
+            ? formatStopwatchTime(loopPositionMs)
+            : hasRecordedLoop
+                ? `${(loopDurationMs / 1000).toFixed(2)}s loop`
+                : "";
 
     const bars = Array.from({ length: 64 }, (_, index) => {
         const wave = Math.sin(index * 0.48) * 0.5 + 0.5;
@@ -124,24 +162,27 @@ function LooperTimeline({ isRecording, isOverdubbing, hasRecordedLoop, isPlaying
 
                 <div className="text-right">
                     <div className="text-[11px] uppercase tracking-[0.18em] text-white/40">
-                        Duration
+                        {durationLabel}
                     </div>
                     <div className="mt-2 text-sm font-semibold text-white/80">
-                        {durationLabel}
+                        {durationContent}
                     </div>
                 </div>
             </div>
 
             <div
-                className={`mt-6 flex h-[130px] items-end gap-1 rounded-xl border border-white/10 bg-black/30 p-3 ${isRecording ? "rfx-recording-waveform" : ""}`}
+                className={`mt-6 flex h-[130px] items-end gap-1 rounded-xl border border-white/10 bg-black/30 p-3 ${
+                    isRecording ? "rfx-recording-waveform" : ""
+                }`}
             >
                 {bars.map((height, index) => (
                     <div
                         key={index}
-                        className={`flex-1 rounded-full transition-colors duration-150 ${index / bars.length <= progress || isRecording
-                            ? "bg-emerald-300/80"
-                            : "bg-white/15"
-                            }`}
+                        className={`flex-1 rounded-full transition-colors duration-150 ${
+                            index / bars.length <= progress || isRecording
+                                ? "bg-emerald-300/80"
+                                : "bg-white/15"
+                        }`}
                         style={{ height: `${height}%` }}
                     />
                 ))}
@@ -159,6 +200,7 @@ function LooperTimeline({ isRecording, isOverdubbing, hasRecordedLoop, isPlaying
 
 export function LooperView() {
     const navigate = useNavigate();
+
     const [activeControls, setActiveControls] = useState(() => new Set());
     const [playbackMasterVolume, setPlaybackMasterVolume] = useState(0);
     const [isExpressionActive, setIsExpressionActive] = useState(false);
@@ -168,7 +210,16 @@ export function LooperView() {
     const [isLoopPlaying, setIsLoopPlaying] = useState(false);
     const [loopDurationMs, setLoopDurationMs] = useState(0);
     const [loopPositionMs, setLoopPositionMs] = useState(0);
-    const [looperTypeIndex, setLooperTypeIndex] = useState(0);
+
+    const looperType = useRfxStore((state) => state.session.looperType);
+    const setLooperType = useRfxStore((state) => state.setLooperType);
+
+    const looperTypeIndex = Math.max(
+        LOOPER_TYPES.findIndex((type) => type.id === looperType),
+        0
+    );
+
+    const currentLooperType = LOOPER_TYPES[looperTypeIndex];
 
     const releaseTimersRef = useRef(new Map());
     const expressionTimerRef = useRef(null);
@@ -178,6 +229,37 @@ export function LooperView() {
     const badgesByControl = useMemo(
         () => new Map(LOOPER_DEBUG_BADGES.map((badge) => [badge.control, badge])),
         []
+    );
+
+    const getBadgeClasses = useCallback(
+        (badge) => {
+            if (badge.color === "red") {
+                return {
+                    inactiveClasses: CONTROL_COLORS.redFaint,
+                    activeClasses: CONTROL_COLORS.redActive,
+                };
+            }
+
+            if (badge.color === "orange") {
+                return {
+                    inactiveClasses: CONTROL_COLORS.orangeFaint,
+                    activeClasses: CONTROL_COLORS.orangeActive,
+                };
+            }
+
+            if (badge.color === "looperType") {
+                return {
+                    inactiveClasses: currentLooperType.faintClasses,
+                    activeClasses: currentLooperType.classes,
+                };
+            }
+
+            return {
+                inactiveClasses: CONTROL_COLORS.greenFaint,
+                activeClasses: CONTROL_COLORS.greenActive,
+            };
+        },
+        [currentLooperType]
     );
 
     useEffect(() => {
@@ -197,6 +279,7 @@ export function LooperView() {
         };
 
         tick();
+
         const interval = window.setInterval(tick, LOOP_PREVIEW_TICK_MS);
 
         return () => window.clearInterval(interval);
@@ -221,17 +304,20 @@ export function LooperView() {
         });
     }, []);
 
-    const flashControl = useCallback((control) => {
-        clearControlTimer(control);
-        setControlActive(control, true);
+    const flashControl = useCallback(
+        (control) => {
+            clearControlTimer(control);
+            setControlActive(control, true);
 
-        const timer = window.setTimeout(() => {
-            setControlActive(control, false);
-            releaseTimersRef.current.delete(control);
-        }, MOMENTARY_ACTIVE_MS);
+            const timer = window.setTimeout(() => {
+                setControlActive(control, false);
+                releaseTimersRef.current.delete(control);
+            }, MOMENTARY_ACTIVE_MS);
 
-        releaseTimersRef.current.set(control, timer);
-    }, [clearControlTimer, setControlActive]);
+            releaseTimersRef.current.set(control, timer);
+        },
+        [clearControlTimer, setControlActive]
+    );
 
     const activateExpression = useCallback((value01) => {
         setPlaybackMasterVolume(clamp01(value01));
@@ -247,140 +333,156 @@ export function LooperView() {
         }, EXPRESSION_IDLE_MS);
     }, []);
 
-    const handleLooperControl = useCallback((control, value = 127, { flashMomentary = true } = {}) => {
-        if (control === MIDI_CONTROLS.EXPR) {
-            activateExpression(midiValueToPlaybackMasterVolume(value));
-            return;
-        }
+    const handleLooperControl = useCallback(
+        (control, value = 127, { flashMomentary = true } = {}) => {
+            if (control === MIDI_CONTROLS.EXPR) {
+                activateExpression(midiValueToPlaybackMasterVolume(value));
+                return;
+            }
 
-        if (!badgesByControl.has(control)) return;
-        if (value <= 0) return;
+            if (!badgesByControl.has(control)) return;
+            if (value <= 0) return;
 
-        if (control === MIDI_CONTROLS.FS_A) {
-            setIsLoopPlaying(false);
-            setIsOverdubbing(false);
-            playbackStartRef.current = null;
-        }
+            if (control === MIDI_CONTROLS.FS_A) {
+                setIsLoopPlaying(false);
+                setIsOverdubbing(false);
+                playbackStartRef.current = null;
+            }
 
-        if (control === MIDI_CONTROLS.FS_A_LONG) {
-            setIsRecordingFirstLoop(false);
-            setIsOverdubbing(false);
-            setHasRecordedLoop(false);
-            setIsLoopPlaying(false);
-            setLoopDurationMs(0);
-            setLoopPositionMs(0);
-            recordingStartRef.current = null;
-            playbackStartRef.current = null;
-        }
+            if (control === MIDI_CONTROLS.FS_A_LONG) {
+                setIsRecordingFirstLoop(false);
+                setIsOverdubbing(false);
+                setHasRecordedLoop(false);
+                setIsLoopPlaying(false);
+                setLoopDurationMs(0);
+                setLoopPositionMs(0);
+                recordingStartRef.current = null;
+                playbackStartRef.current = null;
+            }
 
-        if (control === MIDI_CONTROLS.FS_C) {
-            setHasRecordedLoop((recorded) => {
-                if (recorded) {
-                    playbackStartRef.current = performance.now();
+            if (control === MIDI_CONTROLS.FS_C) {
+                setHasRecordedLoop((recorded) => {
+                    if (recorded) {
+                        playbackStartRef.current = performance.now();
+                        setLoopPositionMs(0);
+                        setIsLoopPlaying(true);
+                    }
+
+                    return recorded;
+                });
+            }
+
+            if (control === MIDI_CONTROLS.FS_D) {
+                const nextLooperType =
+                    LOOPER_TYPES[(looperTypeIndex + 1) % LOOPER_TYPES.length];
+
+                setLooperType(nextLooperType.id);
+            }
+
+            if (control === MIDI_CONTROLS.FS_D_LONG) {
+                getMidiRuntime()?.modeManager?.setMode(RFX_MODES.PERFORM);
+                navigate("/");
+            }
+
+            if (control === MIDI_CONTROLS.FS_B) {
+                clearControlTimer(MIDI_CONTROLS.FS_B);
+                setControlActive(MIDI_CONTROLS.FS_B, true);
+
+                if (!hasRecordedLoop && !isRecordingFirstLoop) {
+                    recordingStartRef.current = performance.now();
+                    playbackStartRef.current = null;
+                    setIsRecordingFirstLoop(true);
+                    setIsOverdubbing(false);
+                    setIsLoopPlaying(false);
                     setLoopPositionMs(0);
+                } else if (hasRecordedLoop) {
+                    playbackStartRef.current =
+                        playbackStartRef.current ?? performance.now();
+
+                    setIsOverdubbing(true);
                     setIsLoopPlaying(true);
                 }
 
-                return recorded;
-            });
-        }
-
-        if (control === MIDI_CONTROLS.FS_D) {
-            setLooperTypeIndex((index) => (index + 1) % LOOPER_TYPES.length);
-        }
-
-        if (control === MIDI_CONTROLS.FS_D_LONG) {
-            getMidiRuntime()?.modeManager?.setMode(RFX_MODES.PERFORM);
-            navigate("/");
-        }
-
-        if (control === MIDI_CONTROLS.FS_B) {
-            clearControlTimer(MIDI_CONTROLS.FS_B);
-            setControlActive(MIDI_CONTROLS.FS_B, true);
-
-            if (!hasRecordedLoop && !isRecordingFirstLoop) {
-                recordingStartRef.current = performance.now();
-                playbackStartRef.current = null;
-                setIsRecordingFirstLoop(true);
-                setIsOverdubbing(false);
-                setIsLoopPlaying(false);
-                setLoopPositionMs(0);
-            } else if (hasRecordedLoop) {
-                playbackStartRef.current = playbackStartRef.current ?? performance.now();
-                setIsOverdubbing(true);
-                setIsLoopPlaying(true);
+                return;
             }
 
-            return;
-        }
+            if (control === MIDI_CONTROLS.FS_B_RELEASE) {
+                setControlActive(MIDI_CONTROLS.FS_B, false);
 
-        if (control === MIDI_CONTROLS.FS_B_RELEASE) {
-            setControlActive(MIDI_CONTROLS.FS_B, false);
+                if (isRecordingFirstLoop && recordingStartRef.current) {
+                    const duration = Math.max(
+                        performance.now() - recordingStartRef.current,
+                        LOOP_PREVIEW_TICK_MS
+                    );
 
-            if (isRecordingFirstLoop && recordingStartRef.current) {
-                const duration = Math.max(
-                    performance.now() - recordingStartRef.current,
-                    LOOP_PREVIEW_TICK_MS
-                );
+                    setLoopDurationMs(duration);
+                    setLoopPositionMs(0);
+                    setHasRecordedLoop(true);
+                    setIsRecordingFirstLoop(false);
+                    setIsOverdubbing(false);
+                    setIsLoopPlaying(true);
 
-                setLoopDurationMs(duration);
-                setLoopPositionMs(0);
-                setHasRecordedLoop(true);
-                setIsRecordingFirstLoop(false);
-                setIsOverdubbing(false);
-                setIsLoopPlaying(true);
-                recordingStartRef.current = null;
-                playbackStartRef.current = performance.now();
-            } else if (isOverdubbing) {
-                setIsOverdubbing(false);
+                    recordingStartRef.current = null;
+                    playbackStartRef.current = performance.now();
+                } else if (isOverdubbing) {
+                    setIsOverdubbing(false);
+                }
+
+                if (flashMomentary) {
+                    flashControl(MIDI_CONTROLS.FS_B_RELEASE);
+                }
+
+                return;
             }
 
-            if (flashMomentary) {
-                flashControl(MIDI_CONTROLS.FS_B_RELEASE);
+            if (flashMomentary && MOMENTARY_CONTROLS.has(control)) {
+                flashControl(control);
             }
-            return;
-        }
+        },
+        [
+            activateExpression,
+            badgesByControl,
+            clearControlTimer,
+            flashControl,
+            hasRecordedLoop,
+            isOverdubbing,
+            isRecordingFirstLoop,
+            looperTypeIndex,
+            navigate,
+            setControlActive,
+            setLooperType,
+        ]
+    );
 
-        if (flashMomentary && MOMENTARY_CONTROLS.has(control)) {
-            flashControl(control);
-        }
-    }, [
-        activateExpression,
-        badgesByControl,
-        clearControlTimer,
-        flashControl,
-        hasRecordedLoop,
-        isOverdubbing,
-        isRecordingFirstLoop,
-        navigate,
-        setControlActive,
-    ]);
+    const pressLooperControl = useCallback(
+        (control) => {
+            handleLooperControl(control, 127, { flashMomentary: true });
+        },
+        [handleLooperControl]
+    );
 
+    const releaseLooperControl = useCallback(() => {}, []);
 
-    const pressLooperControl = useCallback((control) => {
-        handleLooperControl(control, 127, { flashMomentary: true });
-    }, [handleLooperControl]);
+    const handleControlKeyDown = useCallback(
+        (event, control) => {
+            if (event.repeat) return;
+            if (event.key !== " " && event.key !== "Enter") return;
 
-    const releaseLooperControl = useCallback(() => {
-        // Mouse and keyboard releases should not clear flashed controls. The MIDI
-        // footswitch sends a separate FS_B_RELEASE command when recording stops.
-    }, []);
+            event.preventDefault();
+            pressLooperControl(control);
+        },
+        [pressLooperControl]
+    );
 
-    const handleControlKeyDown = useCallback((event, control) => {
-        if (event.repeat) return;
-        if (event.key !== " " && event.key !== "Enter") return;
+    const handleControlKeyUp = useCallback(
+        (event, control) => {
+            if (event.key !== " " && event.key !== "Enter") return;
 
-        event.preventDefault();
-        pressLooperControl(control);
-    }, [pressLooperControl]);
-
-    const handleControlKeyUp = useCallback((event, control) => {
-        if (event.key !== " " && event.key !== "Enter") return;
-
-        event.preventDefault();
-        releaseLooperControl(control);
-    }, [releaseLooperControl]);
-
+            event.preventDefault();
+            releaseLooperControl(control);
+        },
+        [releaseLooperControl]
+    );
 
     useEffect(() => {
         const handler = (event) => {
@@ -396,7 +498,11 @@ export function LooperView() {
 
         return () => {
             window.removeEventListener("rfx-midi-command", handler);
+        };
+    }, [handleLooperControl]);
 
+    useEffect(() => {
+        return () => {
             releaseTimersRef.current.forEach((timer) => window.clearTimeout(timer));
             releaseTimersRef.current.clear();
 
@@ -405,7 +511,7 @@ export function LooperView() {
                 expressionTimerRef.current = null;
             }
         };
-    }, [handleLooperControl]);
+    }, []);
 
     return (
         <div className="h-full w-full p-3 min-h-0">
@@ -416,8 +522,11 @@ export function LooperView() {
                             <div className="text-[18px] font-semibold tracking-wide truncate">
                                 LOOPER
                             </div>
-                            <div className={`rounded-full border px-3 py-1 text-xs font-semibold text-white/80 ${LOOPER_TYPES[looperTypeIndex].classes}`}>
-                                [{LOOPER_TYPES[looperTypeIndex].label}]
+
+                            <div
+                                className={`rounded-full border px-3 py-1 text-xs font-semibold text-white/80 ${currentLooperType.classes}`}
+                            >
+                                [{currentLooperType.label}]
                             </div>
                         </div>
                     </div>
@@ -427,7 +536,7 @@ export function LooperView() {
                     <div className="p-4 h-full min-h-0">
                         <Inset className="h-full min-h-0 p-4">
                             <div className="grid h-full min-h-0 grid-cols-[repeat(4,minmax(0,1fr))_minmax(190px,0.75fr)] grid-rows-[minmax(0,1fr)_auto_auto] gap-3">
-                                <div className="col-span-4 row-span-1 min-h-0">
+                                <div className="col-span-5 row-span-1 min-h-0">
                                     <LooperTimeline
                                         isRecording={isRecordingFirstLoop}
                                         isOverdubbing={isOverdubbing}
@@ -438,37 +547,43 @@ export function LooperView() {
                                     />
                                 </div>
 
-                                <div className="col-span-4 row-span-2 grid grid-cols-4 grid-rows-2 gap-3 self-end">
-                                    {LOOPER_DEBUG_BADGES.map((badge) => (
-                                        <LooperControlButton
-                                            key={badge.control}
-                                            badge={badge}
-                                            active={activeControls.has(badge.control)}
-                                            activeClasses={
-                                                badge.control === MIDI_CONTROLS.FS_D
-                                                    ? LOOPER_TYPES[looperTypeIndex].classes
-                                                    : undefined
-                                            }
-                                            onPointerDown={() => pressLooperControl(badge.control)}
-                                            onPointerUp={() => releaseLooperControl(badge.control)}
-                                            onKeyDown={(event) => handleControlKeyDown(event, badge.control)}
-                                            onKeyUp={(event) => handleControlKeyUp(event, badge.control)}
-                                        />
-                                    ))}
+                                <div className="col-span-4 row-span-2 grid grid-cols-4 grid-rows-2 gap-3 items-stretch">
+                                    {LOOPER_DEBUG_BADGES.map((badge) => {
+                                        const { inactiveClasses, activeClasses } = getBadgeClasses(badge);
+
+                                        return (
+                                            <LooperControlButton
+                                                key={badge.control}
+                                                badge={badge}
+                                                active={activeControls.has(badge.control)}
+                                                inactiveClasses={inactiveClasses}
+                                                activeClasses={activeClasses}
+                                                onPointerDown={() => pressLooperControl(badge.control)}
+                                                onPointerUp={() => releaseLooperControl(badge.control)}
+                                                onKeyDown={(event) =>
+                                                    handleControlKeyDown(event, badge.control)
+                                                }
+                                                onKeyUp={(event) =>
+                                                    handleControlKeyUp(event, badge.control)
+                                                }
+                                            />
+                                        );
+                                    })}
                                 </div>
 
                                 <div
-                                    className={`col-start-5 row-span-2 row-start-2 rounded-xl border px-3 py-4 transition-all duration-150 ${isExpressionActive
-                                        ? "border-sky-300 bg-sky-400/20 shadow-[0_0_18px_rgba(56,189,248,0.35)]"
-                                        : "border-white/10 bg-black/20"
-                                        }`}
+                                    className={`col-start-5 row-start-2 row-span-2 h-full rounded-xl border px-3 py-4 transition-all duration-150 ${
+                                        isExpressionActive
+                                            ? CONTROL_COLORS.blueActive
+                                            : CONTROL_COLORS.blueFaint
+                                    }`}
                                 >
-                                    <div className="text-[11px] uppercase tracking-[0.18em] text-white/50">
-                                        CC 10 · EXPR
+                                    <div className="mt-3 text-sm font-semibold leading-snug text-white/50">
+                                        EXPR
                                     </div>
 
                                     <div className="mt-3 text-sm font-semibold leading-snug text-white">
-                                        Playback Master Volume
+                                        Output
                                     </div>
 
                                     <div className="mt-4 flex justify-center">
@@ -479,11 +594,11 @@ export function LooperView() {
                                             mapped={false}
                                             mappedLabel=""
                                             onChange={activateExpression}
-                                            onCommit={() => { }}
+                                            onCommit={() => {}}
                                         />
                                     </div>
 
-                                    <div className="mt-1 text-center text-4xl font-bold tabular-nums text-white">
+                                    <div className="mt-1 text-center text-2xl font-bold tabular-nums text-white">
                                         {formatPlaybackMasterVolume(playbackMasterVolume)}
                                     </div>
                                 </div>
