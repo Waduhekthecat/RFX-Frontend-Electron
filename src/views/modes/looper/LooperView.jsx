@@ -159,6 +159,7 @@ function LooperTimeline({
                 ? `${(loopDurationMs / 1000).toFixed(2)}s loop`
                 : "";
 
+    const shouldBlinkWaveform = isRecording || isOverdubbing;
     const recordingWaveformBeatMs = 60000 / Math.max(MIN_TEMPO_BPM, Math.min(tempoBpm, MAX_TEMPO_BPM));
 
     const bars = Array.from({ length: 64 }, (_, index) => {
@@ -222,14 +223,14 @@ function LooperTimeline({
             </div>
 
             <div
-                className={`mt-6 flex h-[130px] items-end gap-1 rounded-xl border border-white/10 bg-black/30 p-3 ${isRecording ? "rfx-recording-waveform" : ""
+                className={`mt-6 flex h-[130px] items-end gap-1 rounded-xl border border-white/10 bg-black/30 p-3 ${shouldBlinkWaveform ? "rfx-recording-waveform" : ""
                     }`}
                     style={{ "--rfx-recording-waveform-beat-ms": `${recordingWaveformBeatMs}ms` }}
             >
                 {bars.map((height, index) => (
                     <div
                         key={index}
-                        className={`flex-1 rounded-full transition-colors duration-150 ${index / bars.length <= progress || isRecording
+                        className={`flex-1 rounded-full transition-colors duration-150 ${index / bars.length <= progress || shouldBlinkWaveform
                             ? "bg-emerald-300/80"
                             : "bg-white/15"
                             }`}
