@@ -10,6 +10,11 @@ import { useRfxStore } from "../../../core/rfx/Store";
 const MOMENTARY_ACTIVE_MS = 350;
 const EXPRESSION_IDLE_MS = 250;
 const LOOP_PREVIEW_TICK_MS = 33;
+const TAP_TEMPO_FLASH_MS = 180;
+const TAP_TEMPO_RESET_MS = 2000;
+const MAX_TAP_TEMPO_TIMES = 4;
+const MIN_TEMPO_BPM = 40;
+const MAX_TEMPO_BPM = 240;
 
 const LOOPER_TYPES = [
     {
@@ -38,6 +43,12 @@ const CONTROL_COLORS = {
 
     blueFaint: "border-sky-300/25 bg-sky-400/5",
     blueActive: "border-sky-300 bg-sky-400/20 shadow-[0_0_18px_rgba(56,189,248,0.35)]",
+
+    grayFaint: "border-white/15 bg-white/5 hover:border-white/25 hover:bg-white/10",
+    amberFaint: "border-amber-300/25 bg-amber-400/10 hover:border-amber-300/45 hover:bg-amber-400/15",
+    amberActive: "border-amber-300/70 bg-amber-400/20 shadow-[0_0_18px_rgba(251,191,36,0.35)]",
+    purpleFaint: "border-purple-300/25 bg-purple-400/10 hover:border-purple-300/45 hover:bg-purple-400/15",
+    purpleActive: "border-purple-300/70 bg-purple-400/20 shadow-[0_0_18px_rgba(192,132,252,0.35)]",
 };
 
 const LOOPER_DEBUG_BADGES = [
@@ -116,6 +127,13 @@ function LooperTimeline({
     isPlaying,
     loopDurationMs,
     loopPositionMs,
+    tempoBpm,
+    isTapTempoActive,
+    onTapTempo,
+    isClickEnabled,
+    onToggleClick,
+    isCountInEnabled,
+    onToggleCountIn,
 }) {
     const progress =
         hasRecordedLoop && loopDurationMs > 0
@@ -149,8 +167,8 @@ function LooperTimeline({
 
     return (
         <div className="h-full min-h-[220px] rounded-xl border border-white/10 bg-black/20 p-4">
-            <div className="flex items-center justify-between gap-3">
-                <div>
+            <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-start gap-3">
+                <div className="min-w-0">
                     <div className="text-[11px] uppercase tracking-[0.18em] text-white/50">
                         Loop Timeline
                     </div>
@@ -159,12 +177,46 @@ function LooperTimeline({
                     </div>
                 </div>
 
-                <div className="text-right">
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-white/40">
-                        {durationLabel}
+                <div className="flex items-center justify-center gap-2 pt-1">
+                    <div className={`rounded-full border px-3 py-1 text-sm font-semibold tabular-nums text-sky-100 ${CONTROL_COLORS.blueFaint}`}>
+                        {tempoBpm} BPM
                     </div>
-                    <div className="mt-2 text-sm font-semibold text-white/80">
-                        {durationContent}
+                    <button
+                        type="button"
+                        onClick={onTapTempo}
+                        className={`rounded-full border px-3 py-1 text-sm font-semibold text-white transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-300/70 ${isTapTempoActive ? CONTROL_COLORS.blueActive : CONTROL_COLORS.blueFaint}`}
+                    >
+                        TAP
+                    </button>
+                </div>
+
+                <div className="flex min-w-0 items-start justify-end gap-3">
+                    <div className="flex flex-wrap justify-end gap-2 pt-1">
+                        <button
+                            type="button"
+                            onClick={onToggleClick}
+                            aria-pressed={isClickEnabled}
+                            className={`rounded-full border px-3 py-1 text-xs font-semibold text-white transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70 ${isClickEnabled ? CONTROL_COLORS.amberActive : CONTROL_COLORS.grayFaint}`}
+                        >
+                            CLICK {isClickEnabled ? "ON" : "OFF"}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={onToggleCountIn}
+                            aria-pressed={isCountInEnabled}
+                            className={`rounded-full border px-3 py-1 text-xs font-semibold text-white transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-300/70 ${isCountInEnabled ? CONTROL_COLORS.purpleActive : CONTROL_COLORS.grayFaint}`}
+                        >
+                            COUNT-IN {isCountInEnabled ? "ON" : "OFF"}
+                        </button>
+                    </div>
+                    
+                    <div className="shrink-0 text-right">
+                        <div className="text-[11px] uppercase tracking-[0.18em] text-white/40">
+                            {durationLabel}
+                        </div>
+                        <div className="mt-2 text-sm font-semibold text-white/80">
+                            {durationContent}
+                        </div>
                     </div>
                 </div>
             </div>
@@ -207,6 +259,11 @@ export function LooperView() {
     const [isLoopPlaying, setIsLoopPlaying] = useState(false);
     const [loopDurationMs, setLoopDurationMs] = useState(0);
     const [loopPositionMs, setLoopPositionMs] = useState(0);
+    const [tempoBpm, setTempoBpm] = useState(120);
+    const [tapTimes, setTapTimes] = useState([]);
+    const [isTapTempoActive, setIsTapTempoActive] = useState(false);
+    const [isClickEnabled, setIsClickEnabled] = useState(false);
+    const [isCountInEnabled, setIsCountInEnabled] = useState(false);
 
     const looperType = useRfxStore((state) => state.session.looperType);
     const setLooperType = useRfxStore((state) => state.setLooperType);
@@ -220,6 +277,7 @@ export function LooperView() {
 
     const releaseTimersRef = useRef(new Map());
     const expressionTimerRef = useRef(null);
+    const tapTempoTimerRef = useRef(null);
     const recordingStartRef = useRef(null);
     const playbackStartRef = useRef(null);
 
@@ -330,6 +388,52 @@ export function LooperView() {
         }, EXPRESSION_IDLE_MS);
     }, []);
 
+
+    const handleTapTempo = useCallback(() => {
+        const now = performance.now();
+
+        setTapTimes((currentTapTimes) => {
+            const lastTapTime = currentTapTimes.at(-1);
+            const recentTapTimes =
+                lastTapTime && now - lastTapTime <= TAP_TEMPO_RESET_MS
+                    ? currentTapTimes
+                    : [];
+            const nextTapTimes = [...recentTapTimes, now].slice(-MAX_TAP_TEMPO_TIMES);
+
+            if (nextTapTimes.length >= 2) {
+                const intervals = nextTapTimes
+                    .slice(1)
+                    .map((tapTime, index) => tapTime - nextTapTimes[index]);
+                const averageIntervalMs =
+                    intervals.reduce((total, interval) => total + interval, 0) / intervals.length;
+                const nextBpm = Math.round(60000 / averageIntervalMs);
+
+                setTempoBpm(Math.max(MIN_TEMPO_BPM, Math.min(nextBpm, MAX_TEMPO_BPM)));
+            }
+
+            return nextTapTimes;
+        });
+
+        setIsTapTempoActive(true);
+
+        if (tapTempoTimerRef.current) {
+            window.clearTimeout(tapTempoTimerRef.current);
+        }
+
+        tapTempoTimerRef.current = window.setTimeout(() => {
+            setIsTapTempoActive(false);
+            tapTempoTimerRef.current = null;
+        }, TAP_TEMPO_FLASH_MS);
+    }, []);
+
+    const toggleClick = useCallback(() => {
+        setIsClickEnabled((enabled) => !enabled);
+    }, []);
+
+    const toggleCountIn = useCallback(() => {
+        setIsCountInEnabled((enabled) => !enabled);
+    }, []);
+    
     const handleLooperControl = useCallback(
         (control, value = 127, { flashMomentary = true } = {}) => {
             if (control === MIDI_CONTROLS.EXPR) {
@@ -507,6 +611,11 @@ export function LooperView() {
                 window.clearTimeout(expressionTimerRef.current);
                 expressionTimerRef.current = null;
             }
+
+            if (tapTempoTimerRef.current) {
+                window.clearTimeout(tapTempoTimerRef.current);
+                tapTempoTimerRef.current = null;
+            }
         };
     }, []);
 
@@ -541,6 +650,13 @@ export function LooperView() {
                                         isPlaying={isLoopPlaying}
                                         loopDurationMs={loopDurationMs}
                                         loopPositionMs={loopPositionMs}
+                                        tempoBpm={tempoBpm}
+                                        isTapTempoActive={isTapTempoActive}
+                                        onTapTempo={handleTapTempo}
+                                        isClickEnabled={isClickEnabled}
+                                        onToggleClick={toggleClick}
+                                        isCountInEnabled={isCountInEnabled}
+                                        onToggleCountIn={toggleCountIn}
                                     />
                                 </div>
 
