@@ -131,40 +131,22 @@ export class MidiCommandBridge {
         console.log("[MIDI] Tuner mode control not implemented yet:", control);
     }
 
-    handleLooperMode({ control }) {
-        switch (control) {
-            case MIDI_CONTROLS.FS_A:
-                this.dispatchCommand("LOOPER_STOP_AND_RETURN", {
-                    source: "midi",
-                    control,
-                });
-                break;
-
-            case MIDI_CONTROLS.FS_A_LONG:
-                this.dispatchCommand("LOOPER_CLEAR", {
-                    source: "midi",
-                    control,
-                });
-                break;
-
-            case MIDI_CONTROLS.FS_D:
-                this.dispatchCommand("LOOPER_RECORD_OR_FINISH", {
-                    source: "midi",
-                    control,
-                });
-                break;
-
-            case MIDI_CONTROLS.FS_D_LONG:
-                this.modeManager.setMode(RFX_MODES.PERFORM);
-                this.dispatchCommand("EXIT_LOOPER_MODE", {
-                    source: "midi",
-                    control,
-                });
-                break;
-
-            default:
-                console.log("[MIDI] Unhandled looper control:", control);
+    handleLooperMode({ control, value, normalizedValue }) {
+        if (control === MIDI_CONTROLS.FS_D_LONG) {
+            this.modeManager.setMode(RFX_MODES.PERFORM);
+            this.dispatchCommand("EXIT_LOOPER_MODE", {
+                source: "midi",
+                control,
+            });
+            return;
         }
+
+        this.dispatchCommand("LOOPER_DEBUG_MIDI_CONTROL", {
+            source: "midi",
+            control,
+            value,
+            normalizedValue,
+        });
     }
 
     handleAutomationMode({ control, eventType, normalizedValue }) {
