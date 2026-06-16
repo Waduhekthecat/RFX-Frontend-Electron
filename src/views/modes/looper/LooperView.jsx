@@ -36,7 +36,14 @@ const MOMENTARY_CONTROLS = new Set([
 const clamp01 = (value = 0) => Math.max(0, Math.min(value, 1));
 const midiValueToPlaybackMasterVolume = (value = 0) => clamp01(value / 127);
 const formatPlaybackMasterVolume = (value01 = 0) => (clamp01(value01) * 10).toFixed(1);
+const formatStopwatchTime = (milliseconds = 0) => {
+    const totalSeconds = Math.floor(Math.max(milliseconds, 0) / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    const tenths = Math.floor((Math.max(milliseconds, 0) % 1000) / 100);
 
+    return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${tenths}`;
+};
 function LooperControlButton({
     badge,
     active,
@@ -58,8 +65,8 @@ function LooperControlButton({
             aria-pressed={active}
             aria-label={`${badge.footswitch} ${badge.command}`}
             className={`rounded-xl border px-3 py-3 min-h-[112px] text-left transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/70 ${active
-                    ? activeClasses
-                    : "border-white/10 bg-black/20 hover:border-white/30 hover:bg-white/10"                
+                ? activeClasses
+                : "border-white/10 bg-black/20 hover:border-white/30 hover:bg-white/10"
                 }`}
         >
             <div className="flex items-center justify-between gap-2 text-[11px] uppercase tracking-[0.18em] text-white/50">
@@ -73,23 +80,25 @@ function LooperControlButton({
     );
 }
 
-function LooperTimeline({ isRecording, hasRecordedLoop, isPlaying, loopDurationMs, loopPositionMs }) {
-    const progress = hasRecordedLoop && loopDurationMs > 0
+function LooperTimeline({ isRecording, isOverdubbing, hasRecordedLoop, isPlaying, loopDurationMs, loopPositionMs }) {
+        const progress = hasRecordedLoop && loopDurationMs > 0
         ? Math.min(loopPositionMs / loopDurationMs, 1)
         : 0;
 
-    const status = isRecording
-        ? "Recording first loop"
-        : isPlaying
-            ? "Playing loop"
-            : hasRecordedLoop
-                ? "Loop armed"
-                : "Waiting for first record trigger";
-
-    const durationLabel = hasRecordedLoop
-        ? `${(loopDurationMs / 1000).toFixed(2)}s loop`
+    const status = isOverdubbing
+        ? "Overdubbing"
         : isRecording
-            ? "Counting..."
+        ? "Counting"
+            : isPlaying
+                ? "Playing loop"
+                : hasRecordedLoop
+                    ? "Loop armed"
+                    : "Waiting for first record trigger";
+
+    const durationLabel = isRecording && !hasRecordedLoop
+        ? formatStopwatchTime(loopPositionMs)
+        : hasRecordedLoop
+            ? `${(loopDurationMs / 1000).toFixed(2)}s loop`
             : "No loop captured";
 
     const bars = Array.from({ length: 64 }, (_, index) => {
@@ -125,8 +134,8 @@ function LooperTimeline({ isRecording, hasRecordedLoop, isPlaying, loopDurationM
                     <div
                         key={index}
                         className={`flex-1 rounded-full transition-colors duration-150 ${index / bars.length <= progress || isRecording
-                                ? "bg-emerald-300/80"
-                                : "bg-white/15"
+                            ? "bg-emerald-300/80"
+                            : "bg-white/15"
                             }`}
                         style={{ height: `${height}%` }}
                     />
@@ -135,7 +144,7 @@ function LooperTimeline({ isRecording, hasRecordedLoop, isPlaying, loopDurationM
 
             <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/10">
                 <div
-                    className="h-full rounded-full bg-emerald-300 transition-[width] duration-75"
+                    className="h-full rounded-full bg-emerald-300"
                     style={{ width: `${progress * 100}%` }}
                 />
             </div>
@@ -148,6 +157,7 @@ export function LooperView() {
     const [playbackMasterVolume, setPlaybackMasterVolume] = useState(0);
     const [isExpressionActive, setIsExpressionActive] = useState(false);
     const [isRecordingFirstLoop, setIsRecordingFirstLoop] = useState(false);
+    const [isOverdubbing, setIsOverdubbing] = useState(false);
     const [hasRecordedLoop, setHasRecordedLoop] = useState(false);
     const [isLoopPlaying, setIsLoopPlaying] = useState(false);
     const [loopDurationMs, setLoopDurationMs] = useState(0);
@@ -231,7 +241,7 @@ export function LooperView() {
         }, EXPRESSION_IDLE_MS);
     }, []);
 
-       const handleLooperControl = useCallback((control, value = 127, { flashMomentary = true } = {}) => {
+    const handleLooperControl = useCallback((control, value = 127, { flashMomentary = true } = {}) => {
         if (control === MIDI_CONTROLS.EXPR) {
             activateExpression(midiValueToPlaybackMasterVolume(value));
             return;
@@ -242,11 +252,13 @@ export function LooperView() {
 
         if (control === MIDI_CONTROLS.FS_A) {
             setIsLoopPlaying(false);
+            setIsOverdubbing(false);
             playbackStartRef.current = null;
         }
 
         if (control === MIDI_CONTROLS.FS_A_LONG) {
             setIsRecordingFirstLoop(false);
+            setIsOverdubbing(false);
             setHasRecordedLoop(false);
             setIsLoopPlaying(false);
             setLoopDurationMs(0);
@@ -279,8 +291,13 @@ export function LooperView() {
                 recordingStartRef.current = performance.now();
                 playbackStartRef.current = null;
                 setIsRecordingFirstLoop(true);
+                setIsOverdubbing(false);
                 setIsLoopPlaying(false);
                 setLoopPositionMs(0);
+                } else if (hasRecordedLoop) {
+                playbackStartRef.current = playbackStartRef.current ?? performance.now();
+                setIsOverdubbing(true);
+                setIsLoopPlaying(true);
             }
 
             return;
@@ -299,9 +316,12 @@ export function LooperView() {
                 setLoopPositionMs(0);
                 setHasRecordedLoop(true);
                 setIsRecordingFirstLoop(false);
+                setIsOverdubbing(false);
                 setIsLoopPlaying(true);
                 recordingStartRef.current = null;
                 playbackStartRef.current = performance.now();
+                } else if (isOverdubbing) {
+                setIsOverdubbing(false);
             }
 
             if (flashMomentary) {
@@ -319,6 +339,7 @@ export function LooperView() {
         clearControlTimer,
         flashControl,
         hasRecordedLoop,
+        isOverdubbing,
         isRecordingFirstLoop,
         setControlActive,
     ]);
@@ -397,6 +418,7 @@ export function LooperView() {
                                 <div className="col-span-4 row-span-1 min-h-0">
                                     <LooperTimeline
                                         isRecording={isRecordingFirstLoop}
+                                        isOverdubbing={isOverdubbing}
                                         hasRecordedLoop={hasRecordedLoop}
                                         isPlaying={isLoopPlaying}
                                         loopDurationMs={loopDurationMs}
@@ -425,8 +447,8 @@ export function LooperView() {
 
                                 <div
                                     className={`col-start-5 row-span-2 row-start-2 rounded-xl border px-3 py-4 transition-all duration-150 ${isExpressionActive
-                                            ? "border-sky-300 bg-sky-400/20 shadow-[0_0_18px_rgba(56,189,248,0.35)]"
-                                            : "border-white/10 bg-black/20"
+                                        ? "border-sky-300 bg-sky-400/20 shadow-[0_0_18px_rgba(56,189,248,0.35)]"
+                                        : "border-white/10 bg-black/20"
                                         }`}
                                 >
                                     <div className="text-[11px] uppercase tracking-[0.18em] text-white/50">
