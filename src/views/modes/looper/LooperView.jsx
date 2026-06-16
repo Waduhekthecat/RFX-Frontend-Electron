@@ -159,7 +159,6 @@ function LooperTimeline({
                 ? `${(loopDurationMs / 1000).toFixed(2)}s loop`
                 : "";
 
-    const shouldBlinkWaveform = isRecording || isOverdubbing;
     const recordingWaveformBeatMs = 60000 / Math.max(MIN_TEMPO_BPM, Math.min(tempoBpm, MAX_TEMPO_BPM));
 
     const bars = Array.from({ length: 64 }, (_, index) => {
@@ -181,7 +180,7 @@ function LooperTimeline({
                 </div>
 
                 <div className="flex flex-wrap items-stretch justify-center gap-2">
-                    <div className={`flex h-full min-h-[72px] items-center rounded-xl border px-5 py-3 text-base font-semibold tabular-nums text-sky-100 ${CONTROL_COLORS.blueFaint}`}>
+                    <div className={`flex h-[64px] w-[92px] items-center justify-center rounded-xl border px-3 py-2 text-sm font-semibold tabular-nums text-sky-100 ${CONTROL_COLORS.blueFaint}`}>
                         {tempoBpm} BPM
                     </div>
                     <button
@@ -219,19 +218,24 @@ function LooperTimeline({
             </div>
 
             <div
-                className={`mt-3 flex h-[130px] items-end gap-1 rounded-xl border border-white/10 bg-black/30 p-3 ${shouldBlinkWaveform ? "rfx-recording-waveform" : ""}`}
+                className="mt-6 flex h-[130px] items-end gap-1 rounded-xl border border-white/10 bg-black/30 p-3"
                 style={{ "--rfx-recording-waveform-beat-ms": `${recordingWaveformBeatMs}ms` }}
             >
-                {bars.map((height, index) => (
-                    <div
-                        key={index}
-                        className={`flex-1 rounded-full transition-colors duration-150 ${(hasRecordedLoop && index / bars.length <= progress) || shouldBlinkWaveform
-                            ? "bg-emerald-300/80"
-                            : "bg-white/15"
-                            }`}
-                        style={{ height: `${height}%` }}
-                    />
-                ))}
+                {bars.map((height, index) => {
+                    const isWaveformBarGreen = (hasRecordedLoop && index / bars.length <= progress) || isRecording;
+                    const shouldBlinkWaveformBar = isRecording || (isOverdubbing && isWaveformBarGreen);
+
+                    return (
+                        <div
+                            key={index}
+                            className={`flex-1 rounded-full transition-colors duration-150 ${isWaveformBarGreen
+                                ? "bg-emerald-300/80"
+                                : "bg-white/15"
+                                } ${shouldBlinkWaveformBar ? "rfx-recording-waveform" : ""}`}
+                            style={{ height: `${height}%` }}
+                        />
+                    );
+                })}
             </div>
 
             <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/10">
