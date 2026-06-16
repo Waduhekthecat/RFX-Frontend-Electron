@@ -95,9 +95,8 @@ function LooperControlButton({
             onKeyUp={onKeyUp}
             aria-pressed={active}
             aria-label={`${badge.footswitch} ${badge.command}`}
-            className={`rounded-xl border px-3 py-3 h-full min-h-[150px] text-left transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/70 ${
-                active ? activeClasses : inactiveClasses
-            }`}
+            className={`rounded-xl border px-3 py-3 h-full min-h-[140px] text-left transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/70 ${active ? activeClasses : inactiveClasses
+                }`}
         >
             <div className="mt-3 text-sm font-semibold leading-snug text-white/50">
                 <span>{badge.footswitch}</span>
@@ -171,18 +170,16 @@ function LooperTimeline({
             </div>
 
             <div
-                className={`mt-6 flex h-[130px] items-end gap-1 rounded-xl border border-white/10 bg-black/30 p-3 ${
-                    isRecording ? "rfx-recording-waveform" : ""
-                }`}
+                className={`mt-6 flex h-[130px] items-end gap-1 rounded-xl border border-white/10 bg-black/30 p-3 ${isRecording ? "rfx-recording-waveform" : ""
+                    }`}
             >
                 {bars.map((height, index) => (
                     <div
                         key={index}
-                        className={`flex-1 rounded-full transition-colors duration-150 ${
-                            index / bars.length <= progress || isRecording
+                        className={`flex-1 rounded-full transition-colors duration-150 ${index / bars.length <= progress || isRecording
                                 ? "bg-emerald-300/80"
                                 : "bg-white/15"
-                        }`}
+                            }`}
                         style={{ height: `${height}%` }}
                     />
                 ))}
@@ -461,7 +458,7 @@ export function LooperView() {
         [handleLooperControl]
     );
 
-    const releaseLooperControl = useCallback(() => {}, []);
+    const releaseLooperControl = useCallback(() => { }, []);
 
     const handleControlKeyDown = useCallback(
         (event, control) => {
@@ -572,11 +569,10 @@ export function LooperView() {
                                 </div>
 
                                 <div
-                                    className={`col-start-5 row-start-2 row-span-2 h-full rounded-xl border px-3 py-4 transition-all duration-150 ${
-                                        isExpressionActive
+                                    className={`col-start-5 row-start-2 row-span-2 h-full rounded-xl border px-3 py-4 transition-all duration-150 ${isExpressionActive
                                             ? CONTROL_COLORS.blueActive
                                             : CONTROL_COLORS.blueFaint
-                                    }`}
+                                        }`}
                                 >
                                     <div className="mt-3 text-sm font-semibold leading-snug text-white/50">
                                         EXPR
@@ -594,7 +590,7 @@ export function LooperView() {
                                             mapped={false}
                                             mappedLabel=""
                                             onChange={activateExpression}
-                                            onCommit={() => {}}
+                                            onCommit={() => { }}
                                         />
                                     </div>
 
