@@ -159,6 +159,8 @@ function LooperTimeline({
                 ? `${(loopDurationMs / 1000).toFixed(2)}s loop`
                 : "";
 
+    const recordingWaveformBeatMs = 60000 / Math.max(MIN_TEMPO_BPM, Math.min(tempoBpm, MAX_TEMPO_BPM));
+
     const bars = Array.from({ length: 64 }, (_, index) => {
         const wave = Math.sin(index * 0.48) * 0.5 + 0.5;
         const accent = Math.sin(index * 0.17 + 1.4) * 0.5 + 0.5;
@@ -207,7 +209,7 @@ function LooperTimeline({
                 </div>
 
                 <div className="flex min-w-0 items-start justify-end gap-3">
-                    
+
                     <div className="shrink-0 text-right">
                         <div className="text-[11px] uppercase tracking-[0.18em] text-white/40">
                             {durationLabel}
@@ -222,13 +224,14 @@ function LooperTimeline({
             <div
                 className={`mt-6 flex h-[130px] items-end gap-1 rounded-xl border border-white/10 bg-black/30 p-3 ${isRecording ? "rfx-recording-waveform" : ""
                     }`}
+                    style={{ "--rfx-recording-waveform-beat-ms": `${recordingWaveformBeatMs}ms` }}
             >
                 {bars.map((height, index) => (
                     <div
                         key={index}
                         className={`flex-1 rounded-full transition-colors duration-150 ${index / bars.length <= progress || isRecording
-                                ? "bg-emerald-300/80"
-                                : "bg-white/15"
+                            ? "bg-emerald-300/80"
+                            : "bg-white/15"
                             }`}
                         style={{ height: `${height}%` }}
                     />
@@ -431,7 +434,7 @@ export function LooperView() {
     const toggleCountIn = useCallback(() => {
         setIsCountInEnabled((enabled) => !enabled);
     }, []);
-    
+
     const handleLooperControl = useCallback(
         (control, value = 127, { flashMomentary = true } = {}) => {
             if (control === MIDI_CONTROLS.EXPR) {
@@ -684,8 +687,8 @@ export function LooperView() {
 
                                 <div
                                     className={`col-start-5 row-start-2 row-span-2 h-full rounded-xl border px-3 py-4 transition-all duration-150 ${isExpressionActive
-                                            ? CONTROL_COLORS.blueActive
-                                            : CONTROL_COLORS.blueFaint
+                                        ? CONTROL_COLORS.blueActive
+                                        : CONTROL_COLORS.blueFaint
                                         }`}
                                 >
                                     <div className="mt-3 text-sm font-semibold leading-snug text-white/50">

@@ -192,5 +192,5 @@ img {
 }
 
 .rfx-recording-waveform {
-  animation: rfxRecordingWaveformBlink 2.8s ease-in-out infinite;
+  animation: rfxRecordingWaveformBlink var(--rfx-recording-waveform-beat-ms, 500ms) ease-in-out infinite;
 }
