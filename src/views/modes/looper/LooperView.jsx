@@ -26,6 +26,7 @@ const LOOPER_DEBUG_BADGES = [
 const MOMENTARY_CONTROLS = new Set([
     MIDI_CONTROLS.FS_A,
     MIDI_CONTROLS.FS_A_LONG,
+    MIDI_CONTROLS.FS_B_RELEASE,
     MIDI_CONTROLS.FS_C,
     MIDI_CONTROLS.FS_C_LONG,
     MIDI_CONTROLS.FS_D,
@@ -39,13 +40,21 @@ const formatPlaybackMasterVolume = (value01 = 0) => (clamp01(value01) * 10).toFi
 function LooperControlButton({
     badge,
     active,
-    onClick,
+    onPointerDown,
+    onPointerUp,
+    onKeyDown,
+    onKeyUp,
     activeClasses = "border-emerald-300 bg-emerald-400/20 shadow-[0_0_18px_rgba(52,211,153,0.35)]",
 }) {
     return (
         <button
             type="button"
-            onClick={onClick}
+            onPointerDown={onPointerDown}
+            onPointerUp={onPointerUp}
+            onPointerCancel={onPointerUp}
+            onPointerLeave={onPointerUp}
+            onKeyDown={onKeyDown}
+            onKeyUp={onKeyUp}
             aria-pressed={active}
             aria-label={`${badge.footswitch} ${badge.command}`}
             className={`rounded-xl border px-3 py-3 min-h-[112px] text-left transition-all duration-150 hover:border-white/30 hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-emerald-300/70 ${active ? activeClasses : "border-white/10 bg-black/20"
@@ -220,8 +229,7 @@ export function LooperView() {
         }, EXPRESSION_IDLE_MS);
     }, []);
 
-    const handleLooperControl = useCallback((control, value = 127) => {
-        if (control === MIDI_CONTROLS.EXPR) {
+        const handleLooperControl = useCallback((control, value = 127, { flashMomentary = true } = {}) => {        if (control === MIDI_CONTROLS.EXPR) {
             activateExpression(midiValueToPlaybackMasterVolume(value));
             return;
         }
@@ -292,11 +300,13 @@ export function LooperView() {
                 playbackStartRef.current = performance.now();
             }
 
-            flashControl(MIDI_CONTROLS.FS_B_RELEASE);
+            if (flashMomentary) {
+                flashControl(MIDI_CONTROLS.FS_B_RELEASE);
+            }
             return;
         }
 
-        if (MOMENTARY_CONTROLS.has(control)) {
+        if (flashMomentary && MOMENTARY_CONTROLS.has(control)) {
             flashControl(control);
         }
     }, [
@@ -308,6 +318,39 @@ export function LooperView() {
         isRecordingFirstLoop,
         setControlActive,
     ]);
+
+
+    const pressLooperControl = useCallback((control) => {
+        if (MOMENTARY_CONTROLS.has(control)) {
+            clearControlTimer(control);
+            setControlActive(control, true);
+        }
+
+        handleLooperControl(control, 127, { flashMomentary: false });
+    }, [clearControlTimer, handleLooperControl, setControlActive]);
+
+    const releaseLooperControl = useCallback((control) => {
+        if (MOMENTARY_CONTROLS.has(control)) {
+            clearControlTimer(control);
+            setControlActive(control, false);
+        }
+    }, [clearControlTimer, setControlActive]);
+
+    const handleControlKeyDown = useCallback((event, control) => {
+        if (event.repeat) return;
+        if (event.key !== " " && event.key !== "Enter") return;
+
+        event.preventDefault();
+        pressLooperControl(control);
+    }, [pressLooperControl]);
+
+    const handleControlKeyUp = useCallback((event, control) => {
+        if (event.key !== " " && event.key !== "Enter") return;
+
+        event.preventDefault();
+        releaseLooperControl(control);
+    }, [releaseLooperControl]);
+
 
     useEffect(() => {
         const handler = (event) => {
@@ -375,7 +418,10 @@ export function LooperView() {
                                                     ? LOOPER_TYPES[looperTypeIndex].classes
                                                     : undefined
                                             }
-                                            onClick={() => handleLooperControl(badge.control)}
+                                            onPointerDown={() => pressLooperControl(badge.control)}
+                                            onPointerUp={() => releaseLooperControl(badge.control)}
+                                            onKeyDown={(event) => handleControlKeyDown(event, badge.control)}
+                                            onKeyUp={(event) => handleControlKeyUp(event, badge.control)}
                                         />
                                     ))}
                                 </div>
