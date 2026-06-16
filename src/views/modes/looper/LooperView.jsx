@@ -169,9 +169,9 @@ function LooperTimeline({
     });
 
     return (
-        <div className="h-full min-h-[220px] rounded-xl border border-white/10 bg-black/20 p-4">
-            <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-start gap-3">
-                <div className="min-w-0">
+        <div className="flex h-full min-h-[220px] flex-col rounded-xl border border-white/10 bg-black/20 p-4">
+            <div className="grid flex-1 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-stretch gap-3">
+                <div className="min-w-0 self-start">
                     <div className="text-[11px] uppercase tracking-[0.18em] text-white/50">
                         Loop Timeline
                     </div>
@@ -180,37 +180,33 @@ function LooperTimeline({
                     </div>
                 </div>
 
-                <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
-                    <div className={`rounded-full border px-3 py-1 text-sm font-semibold tabular-nums text-sky-100 ${CONTROL_COLORS.blueFaint}`}>
+                <div className="flex flex-wrap items-stretch justify-center gap-2">
+                    <div className={`flex h-full min-h-[72px] items-center rounded-xl border px-5 py-3 text-base font-semibold tabular-nums text-sky-100 ${CONTROL_COLORS.blueFaint}`}>
                         {tempoBpm} BPM
                     </div>
                     <button
                         type="button"
                         onClick={onTapTempo}
-                        className={`rounded-full border px-3 py-1 text-sm font-semibold text-white transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-300/70 ${isTapTempoActive ? CONTROL_COLORS.blueActive : CONTROL_COLORS.blueFaint}`}
-                    >
+                        className={`h-full min-h-[72px] rounded-xl border px-5 py-3 text-base font-semibold text-white transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-300/70 ${isTapTempoActive ? CONTROL_COLORS.blueActive : CONTROL_COLORS.blueFaint}`}                    >
                         TAP
                     </button>
                     <button
                         type="button"
                         onClick={onToggleClick}
                         aria-pressed={isClickEnabled}
-                        className={`rounded-full border px-3 py-1 text-xs font-semibold text-white transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70 ${isClickEnabled ? CONTROL_COLORS.amberActive : CONTROL_COLORS.grayFaint}`}
-                    >
+                        className={`h-full min-h-[72px] rounded-xl border px-5 py-3 text-sm font-semibold text-white transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70 ${isClickEnabled ? CONTROL_COLORS.amberActive : CONTROL_COLORS.grayFaint}`}                    >
                         CLICK {isClickEnabled ? "ON" : "OFF"}
                     </button>
                     <button
                         type="button"
                         onClick={onToggleCountIn}
                         aria-pressed={isCountInEnabled}
-                        className={`rounded-full border px-3 py-1 text-xs font-semibold text-white transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-300/70 ${isCountInEnabled ? CONTROL_COLORS.purpleActive : CONTROL_COLORS.grayFaint}`}
-                    >
+                        className={`h-full min-h-[72px] rounded-xl border px-5 py-3 text-sm font-semibold text-white transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-300/70 ${isCountInEnabled ? CONTROL_COLORS.purpleActive : CONTROL_COLORS.grayFaint}`}                    >
                         COUNT-IN {isCountInEnabled ? "ON" : "OFF"}
                     </button>
                 </div>
 
-                <div className="flex min-w-0 items-start justify-end gap-3">
-
+                <div className="flex min-w-0 items-start justify-end gap-3 self-start">
                     <div className="shrink-0 text-right">
                         <div className="text-[11px] uppercase tracking-[0.18em] text-white/40">
                             {durationLabel}
@@ -223,9 +219,8 @@ function LooperTimeline({
             </div>
 
             <div
-                className={`mt-6 flex h-[130px] items-end gap-1 rounded-xl border border-white/10 bg-black/30 p-3 ${shouldBlinkWaveform ? "rfx-recording-waveform" : ""
-                    }`}
-                    style={{ "--rfx-recording-waveform-beat-ms": `${recordingWaveformBeatMs}ms` }}
+                className={`mt-3 flex h-[130px] items-end gap-1 rounded-xl border border-white/10 bg-black/30 p-3 ${shouldBlinkWaveform ? "rfx-recording-waveform" : ""}`}
+                style={{ "--rfx-recording-waveform-beat-ms": `${recordingWaveformBeatMs}ms` }}
             >
                 {bars.map((height, index) => (
                     <div
