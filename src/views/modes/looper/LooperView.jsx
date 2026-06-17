@@ -488,6 +488,7 @@ export function LooperView() {
           LOOPER_TYPES[(looperTypeIndex + 1) % LOOPER_TYPES.length];
 
         setLooperType(nextLooperType.id);
+        dispatchLooperIntent("toggleLooperType", { looperType: nextLooperType.id });
         logLooperSessionStage("[LOOPER TYPE UPDATED]", {
           looperType: nextLooperType.id,
         });

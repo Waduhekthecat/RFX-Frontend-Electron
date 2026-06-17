@@ -33,6 +33,7 @@
  *   | { name: "undoLooperOverdub" }
  *   | { name: "undoLooperRecord" }
  *   | { name: "clearLooper" }
+ *   | { name: "toggleLooperType", looperType: "pre-fx"|"post-fx" }
  *   | { name: string, [k: string]: any } // escape hatch (keep last)
  * )} Syscall
  */

@@ -26,6 +26,12 @@ function normalizeMode(m) {
   return "linear";
 }
 
+function normalizeLooperType(value) {
+  const x = String(value || "").toLowerCase();
+  if (x === "pre-fx") return "pre-fx";
+  return "post-fx";
+}
+
 function canonicalTrackGuid(id) {
   return String(id || "").replace(/^([A-Za-z]+_\d+)_([ABC])$/, "$1$2");
 }
@@ -159,6 +165,11 @@ function makePayload(call) {
     case "startLooperRecord":
       return {
         recordCount: nonNegativeInt(call.recordCount, 0),
+      };
+
+    case "toggleLooperType":
+      return {
+        looperType: normalizeLooperType(call.looperType),
       };
 
     case "stopLooperRecord":
