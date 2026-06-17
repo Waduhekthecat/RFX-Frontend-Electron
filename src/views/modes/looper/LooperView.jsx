@@ -81,7 +81,6 @@ const formatPlaybackMasterVolume = (value01 = 0) => (clamp01(value01) * 10).toFi
 function makeDebugLooperSnapshot({
   looper,
   selectedBusId,
-  passIndex,
   history,
 }) {
   const latestHistoryItem = history.at(-1) ?? null;
@@ -89,7 +88,7 @@ function makeDebugLooperSnapshot({
   return {
     mode: RFX_MODES.LOOPER,
     looperStatus: looper.status,
-    passIndex,
+    recordCount: looper.recordCount ?? 0,
     activeLoopTrack: null,
     recordTargetTrack: null,
     playbackSourceTrack: null,
@@ -108,7 +107,6 @@ export function LooperView() {
   const [isExpressionActive, setIsExpressionActive] = useState(false);
   const [loopPositionMs, setLoopPositionMs] = useState(0);
   const [isTapTempoActive, setIsTapTempoActive] = useState(false);
-  const [recordPassCount, setRecordPassCount] = useState(0);
 
   const looper = useRfxStore((state) => state.session?.looper ?? DEFAULT_LOOPER_STATE);
   const looperType = useRfxStore(
@@ -126,6 +124,7 @@ export function LooperView() {
   const selectedBusId = useRfxStore(
     (state) => state.perf?.activeBusId ?? state.session?.activeBusId ?? null
   );
+  const dispatchIntent = useRfxStore((state) => state.dispatchIntent);
   const updateLooper = useRfxStore((state) => state.updateLooper);
   const setLooperType = useRfxStore((state) => state.setLooperType);
   const setLooperClickEnabled = useRfxStore((state) => state.setLooperClickEnabled);
@@ -137,6 +136,7 @@ export function LooperView() {
     looper.status === "playing" || looper.status === "overdubbing";
   const isOverdubbing = looper.status === "overdubbing";
   const hasRecordedLoop = looper.lengthMs > 0;
+  const recordCount = looper.recordCount ?? 0;
 
   const looperTypeIndex = Math.max(
     LOOPER_TYPES.findIndex((type) => type.id === looperType),
@@ -154,7 +154,6 @@ export function LooperView() {
   const looperLengthMsRef = useRef(looper.lengthMs);
   const looperDebugStateRef = useRef(looper);
   const selectedBusIdRef = useRef(selectedBusId);
-  const passIndexRef = useRef(0);
   const historyRef = useRef([]);
   const exitLoggedRef = useRef(false);
 
@@ -167,14 +166,14 @@ export function LooperView() {
     () =>
       LOOPER_DEBUG_BADGES.map((badge) => {
         if (badge.control !== LOOPER_GESTURES.FS_C_LONG) return badge;
-        if (recordPassCount <= 1) return badge;
+        if (recordCount <= 1) return badge;
 
         return {
           ...badge,
           command: "Undo Overdub",
         };
       }),
-    [recordPassCount]
+    [recordCount]
   );
 
   const getBadgeClasses = useCallback(
@@ -237,7 +236,6 @@ export function LooperView() {
       makeDebugLooperSnapshot({
         looper: nextLooper,
         selectedBusId: selectedBusIdRef.current,
-        passIndex: passIndexRef.current,
         history: historyRef.current,
       })
     );
@@ -250,7 +248,6 @@ export function LooperView() {
       ...makeDebugLooperSnapshot({
         looper: looperDebugStateRef.current ?? DEFAULT_LOOPER_STATE,
         selectedBusId: selectedBusIdRef.current,
-        passIndex: passIndexRef.current,
         history: historyRef.current,
       }),
       tempoBpm: session.tempoBpm ?? DEFAULT_SESSION_TEMPO_BPM,
@@ -266,6 +263,13 @@ export function LooperView() {
       logLooperStage(stage, patch, historyItem);
     },
     [logLooperStage, updateLooper]
+  );
+
+  const dispatchLooperIntent = useCallback(
+    (name, payload = null) => {
+      void dispatchIntent(payload ? { name, ...payload } : { name });
+    },
+    [dispatchIntent]
   );
 
   const logLooperExitOnce = useCallback(() => {
@@ -426,6 +430,7 @@ export function LooperView() {
 
       if (control === MIDI_CONTROLS.FS_A) {
         playbackStartRef.current = null;
+        dispatchLooperIntent("stopLooperPlayback");
         updateLooperWithDebug("[LOOPER PLAYBACK STOP]", {
           status: "stopped",
         });
@@ -433,12 +438,12 @@ export function LooperView() {
 
       if (control === LOOPER_GESTURES.FS_A_LONG) {
         clearLoopPreview();
-        passIndexRef.current = 0;
         historyRef.current = [];
-        setRecordPassCount(0);
+        dispatchLooperIntent("clearLooper");
         updateLooperWithDebug("[LOOPER DELETE AUDIO]", {
           status: "idle",
           lengthMs: 0,
+          recordCount: 0,
         });
       }
 
@@ -446,6 +451,7 @@ export function LooperView() {
         if (hasRecordedLoop) {
           playbackStartRef.current = performance.now();
           setLoopPositionMs(0);
+          dispatchLooperIntent("startLooperPlayback");
           updateLooperWithDebug("[LOOPER START PLAYBACK]", {
             status: "playing",
           });
@@ -454,17 +460,25 @@ export function LooperView() {
 
       if (control === LOOPER_GESTURES.FS_C_LONG) {
         if (isOverdubbing) {
+          dispatchLooperIntent("undoLooperOverdub");
           updateLooperWithDebug("[LOOPER UNDO OVERDUB]", {
             status: "playing",
+            recordCount,
+          });
+        } else if (recordCount > 1) {
+          dispatchLooperIntent("undoLooperOverdub");
+          updateLooperWithDebug("[LOOPER UNDO OVERDUB]", {
+            status: "playing",
+            recordCount: recordCount - 1,
           });
         } else if (isRecording || hasRecordedLoop) {
           clearLoopPreview();
-          passIndexRef.current = 0;
           historyRef.current = [];
-          setRecordPassCount(0);
+          dispatchLooperIntent("undoLooperRecord");
           updateLooperWithDebug("[LOOPER UNDO LAST RECORD]", {
             status: "idle",
             lengthMs: 0,
+            recordCount: 0,
           });
         }
       }
@@ -493,16 +507,20 @@ export function LooperView() {
           recordingStartRef.current = performance.now();
           playbackStartRef.current = null;
           setLoopPositionMs(0);
+          dispatchLooperIntent("startLooperRecord", { recordCount });
           updateLooperWithDebug("[LOOPER RECORD START]", {
             status: "recording",
             lengthMs: 0,
+            recordCount,
           });
         } else if (hasRecordedLoop) {
           playbackStartRef.current =
             playbackStartRef.current ?? performance.now();
 
+          dispatchLooperIntent("startLooperRecord", { recordCount });
           updateLooperWithDebug("[LOOPER OVERDUB START]", {
             status: "overdubbing",
+            recordCount,
           });
         }
 
@@ -522,16 +540,17 @@ export function LooperView() {
           playbackStartRef.current = performance.now();
           setLoopPositionMs(0);
 
-          passIndexRef.current += 1;
-          setRecordPassCount(passIndexRef.current);
+          const nextRecordCount = recordCount + 1;
+          dispatchLooperIntent("stopLooperRecord");
           updateLooperWithDebug(
             "[LOOPER RECORD STOP]",
             {
               status: "playing",
               lengthMs: duration,
+              recordCount: nextRecordCount,
             },
             {
-              passIndex: passIndexRef.current,
+              recordCount: nextRecordCount,
               action: "recordFirstLoop",
               lengthMs: duration,
             }
@@ -539,15 +558,16 @@ export function LooperView() {
           logLooperStage("[LOOPER START PLAYBACK]");
           logLooperStage("[REAPER ROUTING UPDATED]");
         } else if (isOverdubbing) {
-          passIndexRef.current += 1;
-          setRecordPassCount(passIndexRef.current);
+          const nextRecordCount = recordCount + 1;
+          dispatchLooperIntent("stopLooperRecord");
           updateLooperWithDebug(
             "[LOOPER OVERDUB STOP]",
             {
               status: "playing",
+              recordCount: nextRecordCount,
             },
             {
-              passIndex: passIndexRef.current,
+              recordCount: nextRecordCount,
               action: "overdub",
               lengthMs: looperLengthMsRef.current,
             }
@@ -572,6 +592,7 @@ export function LooperView() {
       badgesByControl,
       clearControlTimer,
       clearLoopPreview,
+      dispatchLooperIntent,
       flashControl,
       hasRecordedLoop,
       isOverdubbing,
@@ -581,6 +602,7 @@ export function LooperView() {
       logLooperSessionStage,
       looperTypeIndex,
       navigate,
+      recordCount,
       setControlActive,
       setLooperType,
       updateLooperWithDebug,

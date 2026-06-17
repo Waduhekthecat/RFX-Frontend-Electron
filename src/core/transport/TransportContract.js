@@ -26,6 +26,13 @@
  *   | { name: "reorderFx",    trackGuid: string, fromIndex: number, toIndex: number }
  *   | { name: "getPluginParams", fxGuid: string }
  *   | { name: "setParamValue", fxGuid: string, paramIdx: number, value01: number }
+ *   | { name: "startLooperRecord", recordCount: number }
+ *   | { name: "stopLooperRecord" }
+ *   | { name: "startLooperPlayback" }
+ *   | { name: "stopLooperPlayback" }
+ *   | { name: "undoLooperOverdub" }
+ *   | { name: "undoLooperRecord" }
+ *   | { name: "clearLooper" }
  *   | { name: string, [k: string]: any } // escape hatch (keep last)
  * )} Syscall
  */

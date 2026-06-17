@@ -38,6 +38,7 @@ function asLooperState(v) {
   return {
     status: asLooperStatus(source?.status, "idle"),
     lengthMs: Math.max(0, asNum(source?.lengthMs, 0)),
+    recordCount: Math.max(0, Math.floor(asNum(source?.recordCount ?? source?.record_count, 0))),
   };
 }
 

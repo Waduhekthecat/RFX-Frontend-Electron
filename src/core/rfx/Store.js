@@ -38,6 +38,7 @@ export const DEFAULT_LOOPER_TYPE = "post-fx";
 export const DEFAULT_LOOPER_STATE = Object.freeze({
   status: "idle",
   lengthMs: 0,
+  recordCount: 0,
 });
 
 export const DEFAULT_SESSION_TEMPO_BPM = 120;
@@ -65,6 +66,7 @@ function makeLooperState(value, fallback = DEFAULT_LOOPER_STATE) {
   return {
     status: asLooperStatus(source.status, fallback.status),
     lengthMs: Math.max(0, asNum(source.lengthMs, fallback.lengthMs)),
+    recordCount: Math.max(0, Math.floor(asNum(source.recordCount, fallback.recordCount))),
   };
 }
 
@@ -77,6 +79,9 @@ function makeLooperPatch(patch, fallback = DEFAULT_LOOPER_STATE) {
   }
   if (Object.prototype.hasOwnProperty.call(p, "lengthMs")) {
     next.lengthMs = Math.max(0, asNum(p.lengthMs, fallback.lengthMs));
+  }
+  if (Object.prototype.hasOwnProperty.call(p, "recordCount")) {
+    next.recordCount = Math.max(0, Math.floor(asNum(p.recordCount, fallback.recordCount)));
   }
 
   return next;
@@ -586,6 +591,12 @@ export const useRfxStore = create((set, get) => ({
     const nextLengthMs = Number(lengthMs);
     if (!Number.isFinite(nextLengthMs)) return;
     get().updateLooper({ lengthMs: nextLengthMs });
+  },
+
+  setLooperRecordCount: (recordCount) => {
+    const nextRecordCount = Number(recordCount);
+    if (!Number.isFinite(nextRecordCount)) return;
+    get().updateLooper({ recordCount: nextRecordCount });
   },
 
   selectTrackEffective: (trackGuid) => {

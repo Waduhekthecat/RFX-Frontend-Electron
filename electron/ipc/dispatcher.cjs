@@ -51,6 +51,12 @@ function asStr(x, fallback = "") {
   return s || fallback;
 }
 
+function nonNegativeInt(n, fallback = 0) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return fallback;
+  return Math.max(0, Math.floor(v));
+}
+
 function canonicalizeCall(call) {
   if (!call) return null;
 
@@ -149,6 +155,19 @@ function makePayload(call) {
         paramIdx: Number(call.paramIdx),
         value01: clamp01(call.value01 ?? call.value),
       };
+
+    case "startLooperRecord":
+      return {
+        recordCount: nonNegativeInt(call.recordCount, 0),
+      };
+
+    case "stopLooperRecord":
+    case "startLooperPlayback":
+    case "stopLooperPlayback":
+    case "undoLooperOverdub":
+    case "undoLooperRecord":
+    case "clearLooper":
+      return {};
 
     default:
       return { ...call };

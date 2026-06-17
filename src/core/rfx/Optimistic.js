@@ -189,6 +189,51 @@ export function buildOptimistic(state, intent) {
       };
     }
 
+    case "startLooperRecord": {
+      return {
+        session: {
+          looper: {
+            status: "recording",
+            recordCount: Math.max(0, Math.floor(Number(intent?.recordCount) || 0)),
+          },
+        },
+      };
+    }
+
+    case "stopLooperRecord":
+    case "startLooperPlayback":
+      return {
+        session: {
+          looper: { status: "playing" },
+        },
+      };
+
+    case "stopLooperPlayback":
+      return {
+        session: {
+          looper: { status: "stopped" },
+        },
+      };
+
+    case "undoLooperOverdub":
+      return {
+        session: {
+          looper: { status: "playing" },
+        },
+      };
+
+    case "undoLooperRecord":
+    case "clearLooper":
+      return {
+        session: {
+          looper: {
+            status: "idle",
+            lengthMs: 0,
+            recordCount: 0,
+          },
+        },
+      };
+
     default:
       return null;
   }
