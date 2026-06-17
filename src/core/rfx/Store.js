@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { clamp01, canonicalTrackGuid, normBusId, makeGestureId } from "../DomainHelpers";
+import { clamp01 } from "../DomainHelpers";
 import { normalize } from "./Normalize";
 import { buildOptimistic } from "./Optimistic";
 import { reconcilePending } from "./Reconcile";
@@ -14,9 +14,72 @@ import {
   makeTrackPanKey,
 } from "./Continuous";
 
-function asLooperType(v) {
-  const raw = asStr(v?.looperType ?? v?.session?.looperType, "");
-  return raw || null;
+function asStr(x, fallback = "") {
+  const s = x == null ? "" : String(x);
+  return s || fallback;
+}
+
+function asNum(x, fallback = 0) {
+  const n = Number(x);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+const LOOPER_TYPES = new Set(["pre-fx", "post-fx"]);
+const LOOPER_STATUSES = new Set([
+  "idle",
+  "recording",
+  "playing",
+  "overdubbing",
+  "stopped",
+]);
+
+export const DEFAULT_LOOPER_TYPE = "post-fx";
+
+export const DEFAULT_LOOPER_STATE = Object.freeze({
+  status: "idle",
+  lengthMs: 0,
+});
+
+export const DEFAULT_SESSION_TEMPO_BPM = 120;
+export const DEFAULT_SESSION_CLICK_ENABLED = false;
+export const DEFAULT_SESSION_COUNT_IN_ENABLED = false;
+
+function asLooperTypeValue(value, fallback = DEFAULT_LOOPER_TYPE) {
+  const raw = asStr(value, "").toLowerCase();
+  return LOOPER_TYPES.has(raw) ? raw : fallback;
+}
+
+function asLooperStatus(value, fallback = DEFAULT_LOOPER_STATE.status) {
+  const raw = asStr(value, "").toLowerCase();
+  return LOOPER_STATUSES.has(raw) ? raw : fallback;
+}
+
+function makeLooperState(value, fallback = DEFAULT_LOOPER_STATE) {
+  const source =
+    value?.looper && typeof value.looper === "object" && !Array.isArray(value.looper)
+      ? value.looper
+      : value && typeof value === "object" && !Array.isArray(value)
+        ? value
+        : {};
+
+  return {
+    status: asLooperStatus(source.status, fallback.status),
+    lengthMs: Math.max(0, asNum(source.lengthMs, fallback.lengthMs)),
+  };
+}
+
+function makeLooperPatch(patch, fallback = DEFAULT_LOOPER_STATE) {
+  const p = patch && typeof patch === "object" && !Array.isArray(patch) ? patch : {};
+  const next = {};
+
+  if (Object.prototype.hasOwnProperty.call(p, "status")) {
+    next.status = asLooperStatus(p.status, fallback.status);
+  }
+  if (Object.prototype.hasOwnProperty.call(p, "lengthMs")) {
+    next.lengthMs = Math.max(0, asNum(p.lengthMs, fallback.lengthMs));
+  }
+
+  return next;
 }
 
 const MAX_EVENT_LOG = 300;
@@ -74,6 +137,8 @@ function mergeOverlay(base, patch) {
   return {
     track: { ...(base.track || {}), ...(patch.track || {}) },
     bus: { ...(base.bus || {}), ...(patch.bus || {}) },
+    perf: { ...(base.perf || {}), ...(patch.perf || {}) },
+    session: { ...(base.session || {}), ...(patch.session || {}) },
     fx: { ...(base.fx || {}), ...(patch.fx || {}) },
     fxOrderByTrackGuid: {
       ...(base.fxOrderByTrackGuid || {}),
@@ -84,6 +149,56 @@ function mergeOverlay(base, patch) {
       patch.fxParamsByGuid || {}
     ),
   };
+}
+
+function clearOverlayPatch(base, patch) {
+  if (!patch) return base;
+
+  const next = {
+    track: { ...(base.track || {}) },
+    bus: { ...(base.bus || {}) },
+    perf: { ...(base.perf || {}) },
+    session: { ...(base.session || {}) },
+    fx: { ...(base.fx || {}) },
+    fxOrderByTrackGuid: { ...(base.fxOrderByTrackGuid || {}) },
+    fxParamsByGuid: { ...(base.fxParamsByGuid || {}) },
+  };
+
+  if (patch.bus) {
+    for (const id of Object.keys(patch.bus)) delete next.bus[id];
+  }
+  if (patch.track) {
+    for (const guid of Object.keys(patch.track)) delete next.track[guid];
+  }
+  if (patch.perf) {
+    for (const key of Object.keys(patch.perf)) delete next.perf[key];
+  }
+  if (patch.session) {
+    for (const key of Object.keys(patch.session)) delete next.session[key];
+  }
+  if (patch.fx) {
+    for (const guid of Object.keys(patch.fx)) delete next.fx[guid];
+  }
+  if (patch.fxOrderByTrackGuid) {
+    for (const trackGuid of Object.keys(patch.fxOrderByTrackGuid)) {
+      delete next.fxOrderByTrackGuid[trackGuid];
+    }
+  }
+  if (patch.fxParamsByGuid) {
+    for (const fxGuid of Object.keys(patch.fxParamsByGuid)) {
+      const byIdx = patch.fxParamsByGuid[fxGuid] || {};
+      const baseParams = next.fxParamsByGuid[fxGuid];
+      if (!baseParams) continue;
+
+      const copy = { ...(baseParams || {}) };
+      for (const idx of Object.keys(byIdx)) delete copy[idx];
+
+      if (Object.keys(copy).length === 0) delete next.fxParamsByGuid[fxGuid];
+      else next.fxParamsByGuid[fxGuid] = copy;
+    }
+  }
+
+  return next;
 }
 
 function mergeFxParamsOverlay(base, patch) {
@@ -324,10 +439,15 @@ export const useRfxStore = create((set, get) => ({
   },
 
   session: {
+    activeBusId: null,
     activeTrackGuid: null,
     selectedTrackGuid: null,
     selectedFxGuid: null,
-    looperType: "post-fx",
+    looperType: DEFAULT_LOOPER_TYPE,
+    looper: { ...DEFAULT_LOOPER_STATE },
+    tempoBpm: DEFAULT_SESSION_TEMPO_BPM,
+    clickEnabled: DEFAULT_SESSION_CLICK_ENABLED,
+    countInEnabled: DEFAULT_SESSION_COUNT_IN_ENABLED,
   },
 
   ops: {
@@ -336,6 +456,8 @@ export const useRfxStore = create((set, get) => ({
     overlay: {
       track: {},
       bus: {},
+      perf: {},
+      session: {},
       fx: {},
       fxOrderByTrackGuid: {},
       fxParamsByGuid: {},
@@ -382,16 +504,88 @@ export const useRfxStore = create((set, get) => ({
     set((s) => ({ ops: { ...s.ops, eventLog: [] } }));
   },
 
-  setLooperType: (looperType) => {
-    const nextLooperType = String(looperType || "");
-    if (!nextLooperType) return;
+  updateLooper: (patch) => {
+    set((s) => {
+      const current = makeLooperState(s.session?.looper, {
+        ...DEFAULT_LOOPER_STATE,
+      });
+      const nextLooper = {
+        ...current,
+        ...makeLooperPatch(patch, current),
+      };
 
+      return {
+        session: {
+          ...s.session,
+          looper: nextLooper,
+        },
+      };
+    });
+  },
+
+  resetLooperState: () => {
+    set((s) => ({
+      session: {
+        ...s.session,
+        looperType: DEFAULT_LOOPER_TYPE,
+        looper: { ...DEFAULT_LOOPER_STATE },
+        tempoBpm: DEFAULT_SESSION_TEMPO_BPM,
+        clickEnabled: DEFAULT_SESSION_CLICK_ENABLED,
+        countInEnabled: DEFAULT_SESSION_COUNT_IN_ENABLED,
+      },
+    }));
+  },
+
+  setLooperType: (looperType) => {
+    const nextLooperType = asLooperTypeValue(looperType, "");
+    if (!nextLooperType) return;
     set((s) => ({
       session: {
         ...s.session,
         looperType: nextLooperType,
       },
     }));
+  },
+
+  setLooperStatus: (status) => {
+    const nextStatus = asLooperStatus(status, "");
+    if (!nextStatus) return;
+    get().updateLooper({ status: nextStatus });
+  },
+
+  setLooperTempoBpm: (tempoBpm) => {
+    const nextTempoBpm = Number(tempoBpm);
+    if (!Number.isFinite(nextTempoBpm)) return;
+    set((s) => ({
+      session: {
+        ...s.session,
+        tempoBpm: Math.max(1, nextTempoBpm),
+      },
+    }));
+  },
+
+  setLooperClickEnabled: (enabled) => {
+    set((s) => ({
+      session: {
+        ...s.session,
+        clickEnabled: !!enabled,
+      },
+    }));
+  },
+
+  setLooperCountInEnabled: (enabled) => {
+    set((s) => ({
+      session: {
+        ...s.session,
+        countInEnabled: !!enabled,
+      },
+    }));
+  },
+
+  setLooperLengthMs: (lengthMs) => {
+    const nextLengthMs = Number(lengthMs);
+    if (!Number.isFinite(nextLengthMs)) return;
+    get().updateLooper({ lengthMs: nextLengthMs });
   },
 
   selectTrackEffective: (trackGuid) => {
@@ -514,6 +708,14 @@ export const useRfxStore = create((set, get) => ({
     const prevPendingOrder = prev.ops.pendingOrder;
 
     const { nextOps, nextContinuous } = reconcilePending(prev, norm);
+    const optimisticActiveBusId =
+      nextOps?.overlay?.perf?.activeBusId ??
+      nextOps?.overlay?.session?.activeBusId ??
+      null;
+    const normalizedActiveBusId =
+      norm.perf?.activeBusId ?? norm.session?.activeBusId ?? null;
+    const effectiveActiveBusId =
+      optimisticActiveBusId ?? normalizedActiveBusId ?? null;
 
     let selectedGuid = prev.session.selectedTrackGuid;
     const idx = Number(norm?.selection?.selectedTrackIndex ?? -1);
@@ -530,47 +732,68 @@ export const useRfxStore = create((set, get) => ({
       prevPendingOrder
     );
 
-    set((s) => ({
-      snapshot: {
-        ...norm.snapshot,
-        receivedAtMs,
-      },
-      reaper: norm.reaper,
-      project: norm.project,
-      transportState: norm.transportState,
-      selection: norm.selection,
-      entities: norm.entities,
-      continuous: nextContinuous ?? s.continuous,
+    set((s) => {
+      const currentLooper = makeLooperState(s.session?.looper, {
+        ...DEFAULT_LOOPER_STATE,
+      });
+      const normalizedLooper = makeLooperState(norm.session, currentLooper);
 
-      perf: norm.perf
-        ? {
-          buses: norm.perf.buses,
-          activeBusId: norm.perf.activeBusId,
-          busModesById:
-            norm.perf.busModesById ?? norm.perf.routingModesById ?? null,
-          metersById: s.meters.byId || s.perf.metersById || null,
-          knobValuesByBusId: s.perf.knobValuesByBusId || {},
-          knobMapByBusId: s.perf.knobMapByBusId || {},
-          mappingArmed: s.perf.mappingArmed ?? null,
-          sliderBusVolumeMapByBusId: s.perf.sliderBusVolumeMapByBusId || {},
-        }
-        : {
-          ...s.perf,
-          metersById: s.meters.byId || s.perf.metersById || null,
+      return {
+        snapshot: {
+          ...norm.snapshot,
+          receivedAtMs,
+        },
+        reaper: norm.reaper,
+        project: norm.project,
+        transportState: norm.transportState,
+        selection: norm.selection,
+        entities: norm.entities,
+        continuous: nextContinuous ?? s.continuous,
+
+        perf: norm.perf
+          ? {
+            buses: norm.perf.buses,
+            activeBusId: effectiveActiveBusId,
+            busModesById:
+              norm.perf.busModesById ?? norm.perf.routingModesById ?? null,
+            metersById: s.meters.byId || s.perf.metersById || null,
+            knobValuesByBusId: s.perf.knobValuesByBusId || {},
+            knobMapByBusId: s.perf.knobMapByBusId || {},
+            mappingArmed: s.perf.mappingArmed ?? null,
+            sliderBusVolumeMapByBusId: s.perf.sliderBusVolumeMapByBusId || {},
+          }
+          : {
+            ...s.perf,
+            activeBusId: effectiveActiveBusId ?? s.perf.activeBusId ?? null,
+            metersById: s.meters.byId || s.perf.metersById || null,
+          },
+
+        session: {
+          ...s.session,
+          activeBusId: effectiveActiveBusId ?? s.session.activeBusId ?? null,
+          activeTrackGuid: activeGuid,
+          selectedTrackGuid: selectedGuid,
+          looperType:
+            norm.session?.looperType ?? s.session.looperType ?? DEFAULT_LOOPER_TYPE,
+          looper: normalizedLooper,
+          tempoBpm:
+            norm.session?.tempoBpm ?? s.session.tempoBpm ?? DEFAULT_SESSION_TEMPO_BPM,
+          clickEnabled:
+            norm.session?.clickEnabled ??
+            s.session.clickEnabled ??
+            DEFAULT_SESSION_CLICK_ENABLED,
+          countInEnabled:
+            norm.session?.countInEnabled ??
+            s.session.countInEnabled ??
+            DEFAULT_SESSION_COUNT_IN_ENABLED,
         },
 
-      session: {
-        ...s.session,
-        activeTrackGuid: activeGuid,
-        selectedTrackGuid: selectedGuid,
-        looperType: norm.session?.looperType || s.session.looperType || "post-fx",
-      },
-
-      ops: {
-        ...nextOps,
-        eventLog: s.ops.eventLog,
-      },
-    }));
+        ops: {
+          ...nextOps,
+          eventLog: s.ops.eventLog,
+        },
+      };
+    });
 
     if (seqChanged) {
       const changed =
@@ -966,6 +1189,7 @@ export const useRfxStore = create((set, get) => ({
               error: "no transport",
             },
           },
+          overlay: clearOverlayPatch(s.ops.overlay, optimistic),
         },
       }));
 
@@ -1006,6 +1230,7 @@ export const useRfxStore = create((set, get) => ({
                 error: msg,
               },
             },
+            overlay: clearOverlayPatch(s.ops.overlay, optimistic),
           },
         }));
 
@@ -1048,6 +1273,7 @@ export const useRfxStore = create((set, get) => ({
               error: msg,
             },
           },
+          overlay: clearOverlayPatch(s.ops.overlay, optimistic),
         },
       }));
 

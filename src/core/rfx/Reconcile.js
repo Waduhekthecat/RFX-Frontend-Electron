@@ -123,6 +123,8 @@ export function reconcilePending(prevState, norm) {
   const prevOverlay = prevState?.ops?.overlay || {
     bus: {},
     track: {},
+    perf: {},
+    session: {},
     fx: {},
     fxOrderByTrackGuid: {},
     fxParamsByGuid: {},
@@ -735,6 +737,7 @@ function computeCollapsedSet(pendingOrder, pendingById) {
   const lastPan = new Map();
   const lastBusVol = new Map();
   const lastParam = new Map();
+  let lastActiveBus = null;
 
   for (const opId of pendingOrder) {
     const op = pendingById[opId];
@@ -787,6 +790,11 @@ function computeCollapsedSet(pendingOrder, pendingById) {
       if (lastParam.has(k)) collapsed.add(lastParam.get(k));
       lastParam.set(k, opId);
     }
+
+    if (kind === "selectActiveBus") {
+      if (lastActiveBus) collapsed.add(lastActiveBus);
+      lastActiveBus = opId;
+    }
   }
 
   return collapsed;
@@ -799,6 +807,8 @@ function clearOverlayForOp(overlay, op) {
   const next = {
     bus: { ...(overlay.bus || {}) },
     track: { ...(overlay.track || {}) },
+    perf: { ...(overlay.perf || {}) },
+    session: { ...(overlay.session || {}) },
     fx: { ...(overlay.fx || {}) },
     fxOrderByTrackGuid: { ...(overlay.fxOrderByTrackGuid || {}) },
     fxParamsByGuid: { ...(overlay.fxParamsByGuid || {}) },
@@ -809,6 +819,12 @@ function clearOverlayForOp(overlay, op) {
   }
   if (optimistic.track) {
     for (const guid of Object.keys(optimistic.track)) delete next.track[guid];
+  }
+  if (optimistic.perf) {
+    for (const key of Object.keys(optimistic.perf)) delete next.perf[key];
+  }
+  if (optimistic.session) {
+    for (const key of Object.keys(optimistic.session)) delete next.session[key];
   }
   if (optimistic.fx) {
     for (const guid of Object.keys(optimistic.fx)) delete next.fx[guid];

@@ -4,10 +4,10 @@ export const MIDI_CONTROLS = Object.freeze({
   FS_C: "FS_C",
   FS_D: "FS_D",
 
-  FS_A_LONG: "FS_A_LONG",
+  FS_A_RELEASE: "FS_A_RELEASE",
   FS_B_RELEASE: "FS_B_RELEASE",
-  FS_C_LONG: "FS_C_LONG",
-  FS_D_LONG: "FS_D_LONG",
+  FS_C_RELEASE: "FS_C_RELEASE",
+  FS_D_RELEASE: "FS_D_RELEASE",
 
   EXPR: "EXPR",
 });
@@ -24,16 +24,26 @@ const FS_CC_MAP = {
   13: MIDI_CONTROLS.FS_C,
   14: MIDI_CONTROLS.FS_D,
 
-  101: MIDI_CONTROLS.FS_A_LONG,
+  101: MIDI_CONTROLS.FS_A_RELEASE,
   102: MIDI_CONTROLS.FS_B_RELEASE,
-  103: MIDI_CONTROLS.FS_C_LONG,
-  104: MIDI_CONTROLS.FS_D_LONG,
+  103: MIDI_CONTROLS.FS_C_RELEASE,
+  104: MIDI_CONTROLS.FS_D_RELEASE,
 
   10: MIDI_CONTROLS.EXPR,
 };
 
-const EXPRESSION_CONTROLS = new Set([
-  MIDI_CONTROLS.EXPR,
+const PRESS_CONTROLS = new Set([
+  MIDI_CONTROLS.FS_A,
+  MIDI_CONTROLS.FS_B,
+  MIDI_CONTROLS.FS_C,
+  MIDI_CONTROLS.FS_D,
+]);
+
+const RELEASE_CONTROLS = new Set([
+  MIDI_CONTROLS.FS_A_RELEASE,
+  MIDI_CONTROLS.FS_B_RELEASE,
+  MIDI_CONTROLS.FS_C_RELEASE,
+  MIDI_CONTROLS.FS_D_RELEASE,
 ]);
 
 export class MidiMapper {
@@ -62,12 +72,18 @@ export class MidiMapper {
   }
 
   getEventType(control, value) {
-    if (EXPRESSION_CONTROLS.has(control)) {
+    if (control === MIDI_CONTROLS.EXPR) {
       return MIDI_EVENT_TYPES.CONTINUOUS;
     }
 
-    return value > 0
-      ? MIDI_EVENT_TYPES.PRESS
-      : MIDI_EVENT_TYPES.RELEASE;
+    if (RELEASE_CONTROLS.has(control)) {
+      return MIDI_EVENT_TYPES.RELEASE;
+    }
+
+    if (PRESS_CONTROLS.has(control) && value > 0) {
+      return MIDI_EVENT_TYPES.PRESS;
+    }
+
+    return MIDI_EVENT_TYPES.RELEASE;
   }
 }

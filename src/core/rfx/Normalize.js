@@ -14,8 +14,55 @@ function ensureSelectionIndex(n) {
 }
 
 function asLooperType(v) {
-  const raw = asStr(v?.looperType ?? v?.session?.looperType, "");
+  const raw = asStr(v?.session?.looper?.type ?? v?.looper?.type ?? v?.looperType ?? v?.session?.looperType, "");
   return raw || null;
+}
+
+function asLooperStatus(v, fallback = "idle") {
+  const raw = asStr(v, "").toLowerCase();
+  return ["idle", "recording", "playing", "overdubbing", "stopped"].includes(raw)
+    ? raw
+    : fallback;
+}
+
+function asLooperState(v) {
+  const source =
+    v?.session?.looper && typeof v.session.looper === "object" && !Array.isArray(v.session.looper)
+      ? v.session.looper
+      : v?.looper && typeof v.looper === "object" && !Array.isArray(v.looper)
+        ? v.looper
+        : null;
+
+  if (!source) return null;
+
+  return {
+    status: asLooperStatus(source?.status, "idle"),
+    lengthMs: Math.max(0, asNum(source?.lengthMs, 0)),
+  };
+}
+
+function hasValue(v) {
+  return v !== undefined && v !== null;
+}
+
+function asSessionTempoBpm(v) {
+  const raw =
+    v?.session?.tempoBpm ??
+    v?.tempoBpm ??
+    v?.session?.looper?.tempoBpm ??
+    v?.looper?.tempoBpm;
+
+  return hasValue(raw) ? Math.max(1, asNum(raw, 120)) : null;
+}
+
+function asSessionBool(v, key) {
+  const raw =
+    v?.session?.[key] ??
+    v?.[key] ??
+    v?.session?.looper?.[key] ??
+    v?.looper?.[key];
+
+  return hasValue(raw) ? !!raw : null;
 }
 
 export function normalize(view) {
@@ -206,6 +253,10 @@ export function normalize(view) {
       session: {
         activeBusId,
         looperType: asLooperType(v),
+        looper: asLooperState(v),
+        tempoBpm: asSessionTempoBpm(v),
+        clickEnabled: asSessionBool(v, "clickEnabled"),
+        countInEnabled: asSessionBool(v, "countInEnabled"),
       },
 
       entities: {
@@ -256,6 +307,10 @@ export function normalize(view) {
   const session = {
     activeBusId: asStr(v?.session?.activeBusId, ""),
     looperType: asLooperType(v),
+    looper: asLooperState(v),
+    tempoBpm: asSessionTempoBpm(v),
+    clickEnabled: asSessionBool(v, "clickEnabled"),
+    countInEnabled: asSessionBool(v, "countInEnabled"),
   };
 
   const tracks = Array.isArray(v?.tracks) ? v.tracks : [];

@@ -158,8 +158,8 @@ export function TunerView() {
                                                 activeClasses={activeClasses}
                                                 onPointerDown={() => pressTunerControl(badge.control)}
                                                 onPointerUp={() => releaseTunerControl(badge.control)}
-                                                onKeyDown={(event) => handleControlKeyDown(event, badge.control)}
-                                                onKeyUp={(event) => handleControlKeyUp(event, badge.control)}
+                                                // onKeyDown={(event) => handleControlKeyDown(event, badge.control)}
+                                                // onKeyUp={(event) => handleControlKeyUp(event, badge.control)}
                                             />
                                         );
                                     })}

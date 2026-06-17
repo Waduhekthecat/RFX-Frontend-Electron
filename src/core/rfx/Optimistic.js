@@ -26,18 +26,6 @@ export function buildOptimistic(state, intent) {
       return { track: { [trackGuid]: { solo: value ? 1 : 0 } } };
     }
 
-    case "setVol": {
-      const { trackGuid, value } = intent || {};
-      if (!trackGuid) return null;
-      return { track: { [trackGuid]: { vol: Number(value ?? 1) } } };
-    }
-
-    case "setPan": {
-      const { trackGuid, value } = intent || {};
-      if (!trackGuid) return null;
-      return { track: { [trackGuid]: { pan: Number(value ?? 0) } } };
-    }
-
     // ---------------------------
     // ✅ FX: add (optimistic)
     // ---------------------------
@@ -192,7 +180,15 @@ export function buildOptimistic(state, intent) {
         },
       };
     }
-    case "selectActiveBus":
+    case "selectActiveBus": {
+      const busId = normBusId(intent?.busId);
+      if (!busId) return null;
+      return {
+        perf: { activeBusId: busId },
+        session: { activeBusId: busId },
+      };
+    }
+
     default:
       return null;
   }
