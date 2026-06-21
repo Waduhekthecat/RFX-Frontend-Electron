@@ -1,9 +1,8 @@
 import React from "react";
-import { useNavigate } from "react-router-dom";
 import { Panel, Inset } from "../../../components/ui/Panel";
 import { MIDI_CONTROLS } from "../../../core/midi/MidiMapper";
 import { Knob } from "../../../components/controls/knobs/Knob";
-import { getMidiRuntime } from "../../../core/midi/MidiInitialize";
+import { modeManager } from "../../../core/modes/ModeManager";
 import { RFX_MODES } from "../../../core/modes/Modes";
 import { useRfxStore } from "../../../core/rfx/Store";
 
@@ -137,7 +136,6 @@ function AutomationCurvePanel({ isRecording, isPlaying, automationDurationMs, au
 }
 
 export function AutomationView() {
-  const navigate = useNavigate();
   const [activeControls, setActiveControls] = React.useState(() => new Set());
   const [automationValue, setAutomationValue] = React.useState(0);
   const [isExpressionActive, setIsExpressionActive] = React.useState(false);
@@ -284,12 +282,11 @@ export function AutomationView() {
     }
 
     if (control === MIDI_CONTROLS.FS_C_LONG) {
-      getMidiRuntime()?.modeManager?.setMode(RFX_MODES.PERFORM);
-      navigate("/");
+      modeManager.setMode(RFX_MODES.PERFORM, { source: "ui" });
     }
 
     if (MOMENTARY_CONTROLS.has(control)) flashControl(control);
-  }, [activateExpression, automationDurationMs, flashControl, isRecording, navigate]);
+  }, [activateExpression, automationDurationMs, flashControl, isRecording]);
 
   const pressAutomationControl = React.useCallback((control) => {
     handleAutomationControl(control, 127);

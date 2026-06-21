@@ -1,5 +1,5 @@
 import React from "react";
-import { BrowserRouter, HashRouter, Routes, Route, useNavigate } from "react-router-dom";
+import { BrowserRouter, HashRouter, Routes, Route } from "react-router-dom";
 
 import { TransportProvider } from "../core/transport/TransportProvider";
 import { BootGate } from "../views/boot/components/BootGate";
@@ -12,7 +12,7 @@ import { RouteView } from "../views/route/RouteView";
 import { SystemView } from "../views/system/SystemView";
 import { CoreInspectorView } from "../views/dev/CoreInspectorView";
 import { PluginManager } from "../views/system/pluginmanager/PluginManager";
-import { MidiNavigationBridge } from "../core/midi/MidiCommandBridge";
+import { ModeNavigationBridge } from "../core/modes/ModeNavigationBridge";
 import { MidiRuntime } from "../core/midi/MidiRuntime";
 import { LooperView } from "../views/modes/looper/LooperView"; 
 import { AutomationView } from "../views/modes/automation/AutomationView";
@@ -28,7 +28,7 @@ export function App() {
                 <MidiRuntime />
                 <BootGate allowSkip autoStart>
                     <Router>
-                        <MidiNavigationBridge />
+                        <ModeNavigationBridge />
                         <Routes>
                             <Route element={<Shell nav={<Nav />} />}>
                                 <Route path="/" element={<PerformView />} />

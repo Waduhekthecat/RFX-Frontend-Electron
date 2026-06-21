@@ -3,15 +3,15 @@ import { NavLink } from "react-router-dom";
 import { useTransportVM } from "../../core/useTransportVM";
 import { normalizeMode } from "../../core/DomainHelpers";
 import { styles, cx } from "./_styles";
-import { getMidiRuntime } from "../../core/midi/MidiInitialize";
+import { modeManager } from "../../core/modes/ModeManager";
 import { RFX_MODES } from "../../core/modes/Modes";
 
 const BASE_TABS = [
-  { label: "Perform", to: "/" },
-  { label: "Edit", to: "/edit" },
-  { label: "Looper", to: "/looper" },
-  { label: "Automation", to: "/automation" },
-  { label: "Tuner", to: "/tuner" },
+  { label: "Perform", to: "/", mode: RFX_MODES.PERFORM },
+  { label: "Edit", to: "/edit", mode: RFX_MODES.EDIT },
+  { label: "Looper", to: "/looper", mode: RFX_MODES.LOOPER },
+  { label: "Automation", to: "/automation", mode: RFX_MODES.AUTOMATION },
+  { label: "Tuner", to: "/tuner", mode: RFX_MODES.TUNER },
   { label: "Routing", to: "/routing" },
   { label: "System", to: "/system" },
 ];
@@ -62,7 +62,10 @@ export function Nav() {
   }, []);
 
   const setAppMode = React.useCallback((nextMode) => {
-    getMidiRuntime()?.modeManager?.setMode(nextMode);
+    modeManager.setMode(nextMode, {
+      dispatchIfUnchanged: true,
+      source: "ui",
+    });
   }, []);
 
   const activeBusId = vm.activeBusId || "FX_1";
@@ -92,8 +95,7 @@ export function Nav() {
               key={t.to}
               to={t.to}
               onClick={() => {
-                if (t.to === "/looper") setAppMode(RFX_MODES.LOOPER);
-                if (t.to === "/") setAppMode(RFX_MODES.PERFORM);
+                if (t.mode) setAppMode(t.mode);
               }}
               className={({ isActive }) =>
                 cx(
