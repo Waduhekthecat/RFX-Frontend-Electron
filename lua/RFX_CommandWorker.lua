@@ -124,6 +124,7 @@ end
 
 local function default_state()
   return {
+    appMode = "perform",
     activeBusId = "FX_1",
     busModes = {
       FX_1 = "linear",
@@ -132,6 +133,22 @@ local function default_state()
       FX_4 = "linear",
     },
   }
+end
+
+local function normalize_app_mode(v)
+  local s = tostring(v or ""):lower()
+  if s == "perform" or s == "edit" or s == "looper" or s == "automation" or s == "tuner" then
+    return s
+  end
+  return nil
+end
+
+local function normalize_looper_type(v)
+  local s = tostring(v or ""):lower()
+  if s == "pre-fx" or s == "post-fx" then
+    return s
+  end
+  return "post-fx"
 end
 
 local function normalize_bus_id(v)
@@ -172,6 +189,7 @@ local function read_state()
   if not normalize_bus_id(state.activeBusId) then
     state.activeBusId = "FX_1"
   end
+  state.appMode = normalize_app_mode(state.appMode) or "perform"
 
   state.busModes.FX_1 = normalize_mode(state.busModes.FX_1) or "linear"
   state.busModes.FX_2 = normalize_mode(state.busModes.FX_2) or "linear"
@@ -356,6 +374,30 @@ local function exec_syncView(_payload)
 
   reaper.ShowConsoleMsg("[RFX] SYNCVIEW export_vm WROTE vm.json ts=" .. tostring(now_ms()) .. "\n")
   log_debug("SYNCVIEW export_vm wrote vm.json ts=" .. tostring(now_ms()))
+  return true
+end
+
+local function exec_setAppMode(mode, payload)
+  local nextMode = normalize_app_mode(mode)
+  if not nextMode then
+    return false, "invalid app mode"
+  end
+
+  local state = read_state()
+  state.appMode = nextMode
+  if nextMode == "looper" then
+    state.looperType = normalize_looper_type(payload and payload.looperType)
+  end
+
+  if not write_state(state) then
+    return false, "failed to write state.json"
+  end
+
+  reaper.SetExtState("RFX", "mode", nextMode, true)
+  if nextMode == "looper" then
+    reaper.SetExtState("RFX", "looperType", state.looperType, true)
+  end
+  request_vm_export("setAppMode:" .. nextMode)
   return true
 end
 
@@ -687,6 +729,16 @@ local function execute_command(cmd)
 
   if name == "syncView" then
     return exec_syncView(payload)
+  elseif name == "setPerformMode" then
+    return exec_setAppMode("perform", payload)
+  elseif name == "setEditMode" then
+    return exec_setAppMode("edit", payload)
+  elseif name == "setLooperMode" then
+    return exec_setAppMode("looper", payload)
+  elseif name == "setAutomationMode" then
+    return exec_setAppMode("automation", payload)
+  elseif name == "setTunerMode" then
+    return exec_setAppMode("tuner", payload)
   elseif name == "selectActiveBus" then
     return exec_selectActiveBus(payload)
   elseif name == "setRoutingMode" then

@@ -47,13 +47,29 @@ export function RfxBridge() {
           })
         : null;
 
+    const unsubscribeCmdResult =
+      typeof transport.subscribeCmdResult === "function"
+        ? transport.subscribeCmdResult((result) => {
+            useRfxStore.getState().ingestCmdResult(result);
+          })
+        : null;
+
     return () => {
       try {
         unsubscribe?.();
-      } catch {}
+      } catch {
+        // Best-effort cleanup.
+      }
       try {
         unsubscribeMeters?.();
-      } catch {}
+      } catch {
+        // Best-effort cleanup.
+      }
+      try {
+        unsubscribeCmdResult?.();
+      } catch {
+        // Best-effort cleanup.
+      }
     };
   }, [transport]);
 

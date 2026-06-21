@@ -1,8 +1,7 @@
 import React from "react";
-import { useNavigate } from "react-router-dom";
 import { Panel, Inset } from "../../../components/ui/Panel";
 import { MIDI_CONTROLS } from "../../../core/midi/MidiMapper";
-import { getMidiRuntime } from "../../../core/midi/MidiInitialize";
+import { modeManager } from "../../../core/modes/ModeManager";
 import { RFX_MODES } from "../../../core/modes/Modes";
 
 const CONTROL_COLORS = {
@@ -58,23 +57,11 @@ function TunerControlButton({ badge, active, inactiveClasses, activeClasses, onP
 }
 
 export function TunerView() {
-    const navigate = useNavigate();
     const [activeControls, setActiveControls] = React.useState(() => new Set());
 
     const exitTunerMode = React.useCallback(() => {
-        const runtime = getMidiRuntime();
-
-        runtime?.modeManager?.setMode?.(RFX_MODES.PERFORM);
-        window.dispatchEvent(
-            new CustomEvent("rfx-midi-command", {
-                detail: {
-                    command: "EXIT_TUNER_MODE",
-                    payload: { source: "ui", control: MIDI_CONTROLS.FS_A_LONG },
-                },
-            })
-        );
-        navigate("/");
-    }, [navigate]);
+        modeManager.setMode(RFX_MODES.PERFORM, { source: "ui" });
+    }, []);
 
     const handleTunerControl = React.useCallback((control) => {
         if (control === MIDI_CONTROLS.FS_A_LONG) {
@@ -98,21 +85,6 @@ export function TunerView() {
             return next;
         });
     }, []);
-
-    const handleControlKeyDown = React.useCallback((event, control) => {
-        if (event.key !== " " && event.key !== "Enter") return;
-        if (event.repeat) return;
-
-        event.preventDefault();
-        pressTunerControl(control);
-    }, [pressTunerControl]);
-
-    const handleControlKeyUp = React.useCallback((event, control) => {
-        if (event.key !== " " && event.key !== "Enter") return;
-
-        event.preventDefault();
-        releaseTunerControl(control);
-    }, [releaseTunerControl]);
 
     return (
         <div className="h-full w-full p-3 min-h-0">
@@ -158,8 +130,6 @@ export function TunerView() {
                                                 activeClasses={activeClasses}
                                                 onPointerDown={() => pressTunerControl(badge.control)}
                                                 onPointerUp={() => releaseTunerControl(badge.control)}
-                                                // onKeyDown={(event) => handleControlKeyDown(event, badge.control)}
-                                                // onKeyUp={(event) => handleControlKeyUp(event, badge.control)}
                                             />
                                         );
                                     })}

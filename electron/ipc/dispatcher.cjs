@@ -86,6 +86,17 @@ function makePayload(call) {
     case "syncView":
       return {};
 
+    case "setPerformMode":
+    case "setEditMode":
+    case "setAutomationMode":
+    case "setTunerMode":
+      return {};
+
+    case "setLooperMode":
+      return {
+        looperType: normalizeLooperType(call.looperType),
+      };
+
     case "selectActiveBus":
       return {
         busId: normBusId(call.busId),

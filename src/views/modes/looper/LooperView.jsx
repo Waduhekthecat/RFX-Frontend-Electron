@@ -1,8 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { Panel, Inset } from "../../../components/ui/Panel";
 import { MIDI_CONTROLS } from "../../../core/midi/MidiMapper";
-import { getMidiRuntime } from "../../../core/midi/MidiInitialize";
+import { modeManager } from "../../../core/modes/ModeManager";
 import { RFX_MODES } from "../../../core/modes/Modes";
 import {
   DEFAULT_LOOPER_STATE,
@@ -100,8 +99,6 @@ function makeDebugLooperSnapshot({
 }
 
 export function LooperView() {
-  const navigate = useNavigate();
-
   const [activeControls, setActiveControls] = useState(() => new Set());
   const [playbackMasterVolume, setPlaybackMasterVolume] = useState(0);
   const [isExpressionActive, setIsExpressionActive] = useState(false);
@@ -496,8 +493,7 @@ export function LooperView() {
 
       if (control === LOOPER_GESTURES.FS_D_LONG) {
         logLooperExitOnce();
-        getMidiRuntime()?.modeManager?.setMode(RFX_MODES.PERFORM);
-        navigate("/");
+        modeManager.setMode(RFX_MODES.PERFORM, { source: "ui" });
       }
 
       if (control === MIDI_CONTROLS.FS_B) {
@@ -602,7 +598,6 @@ export function LooperView() {
       logLooperStage,
       logLooperSessionStage,
       looperTypeIndex,
-      navigate,
       recordCount,
       setControlActive,
       setLooperType,
@@ -751,7 +746,7 @@ export function LooperView() {
   }, [handleLooperControl, logLooperExitOnce]);
 
   useEffect(() => {
-    const unsubscribe = getMidiRuntime()?.modeManager?.subscribe?.((event) => {
+    const unsubscribe = modeManager.subscribe((event) => {
       if (
         event?.previousMode === RFX_MODES.LOOPER &&
         event?.currentMode !== RFX_MODES.LOOPER

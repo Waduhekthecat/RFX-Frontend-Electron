@@ -8,6 +8,15 @@ export function createTransportContractDocs() {
       activeBusId: "FX_1",
       meters: { FX_1: { l: 0.1, r: 0.1 } },
     },
-    Syscalls: ["selectActiveBus", "setRoutingMode", "syncView"],
+    Syscalls: [
+      "selectActiveBus",
+      "setRoutingMode",
+      "syncView",
+      "setPerformMode",
+      "setEditMode",
+      "setLooperMode",
+      "setAutomationMode",
+      "setTunerMode",
+    ],
   };
 }

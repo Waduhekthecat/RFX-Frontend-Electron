@@ -14,6 +14,11 @@
  *   | { name: "selectActiveBus", busId: string }
  *   | { name: "setRoutingMode", busId: string, mode: "linear"|"parallel"|"lcr" }
  *   | { name: "syncView" }
+ *   | { name: "setPerformMode" }
+ *   | { name: "setEditMode" }
+ *   | { name: "setLooperMode", looperType: "pre-fx"|"post-fx" }
+ *   | { name: "setAutomationMode" }
+ *   | { name: "setTunerMode" }
  *   | { name: "toggleRecArm", trackGuid: string, value: boolean }
  *   | { name: "toggleMute",   trackGuid: string, value: boolean }
  *   | { name: "toggleSolo",   trackGuid: string, value: boolean }
