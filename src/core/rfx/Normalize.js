@@ -222,6 +222,7 @@ export function normalize(view) {
         seq: asNum(v.seq, 0),
         schema: asStr(v.schema, "mock_vm"),
         ts: asNum(v.ts, 0),
+        mode: asStr(v.mode, "").toLowerCase() || null,
 
         trackMix,
         busMix,
@@ -252,6 +253,7 @@ export function normalize(view) {
       transportState: v?.transport || null,
 
       session: {
+        mode: asStr(v.mode, "").toLowerCase() || null,
         activeBusId,
         looperType: asLooperType(v),
         looper: asLooperState(v),
@@ -306,6 +308,7 @@ export function normalize(view) {
   const transportState = v?.transport || null;
 
   const session = {
+    mode: asStr(v?.session?.mode ?? v.mode, "").toLowerCase() || null,
     activeBusId: asStr(v?.session?.activeBusId, ""),
     looperType: asLooperType(v),
     looper: asLooperState(v),
@@ -420,7 +423,12 @@ export function normalize(view) {
   );
 
   return {
-    snapshot: { seq, schema, ts },
+    snapshot: {
+      seq,
+      schema,
+      ts,
+      mode: asStr(v?.session?.mode ?? v.mode, "").toLowerCase() || null,
+    },
     reaper,
     project,
     selection,

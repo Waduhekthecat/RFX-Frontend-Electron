@@ -23,11 +23,12 @@ function modeForPath(pathname) {
 export function ModeNavigationBridge() {
   const navigate = useNavigate();
   const location = useLocation();
+  const initializedFromRoute = React.useRef(false);
 
   React.useEffect(() => {
     const unsubscribe = modeManager.subscribe((event) => {
       const nextRoute = ROUTE_BY_MODE[event?.currentMode];
-      if (nextRoute) navigate(nextRoute);
+      if (nextRoute) navigate(nextRoute, { replace: event?.source === "view-model" });
     });
 
     return () => unsubscribe?.();
@@ -35,8 +36,22 @@ export function ModeNavigationBridge() {
 
   React.useEffect(() => {
     const mode = modeForPath(location.pathname);
-    if (mode) modeManager.setMode(mode, { source: "route" });
-  }, [location.pathname]);
+    if (!mode) return;
+
+    if (!initializedFromRoute.current) {
+      initializedFromRoute.current = true;
+
+      if (modeManager.hasConfirmedMode()) {
+        const confirmedRoute = ROUTE_BY_MODE[modeManager.getMode()];
+        if (confirmedRoute && confirmedRoute !== location.pathname) {
+          navigate(confirmedRoute, { replace: true });
+          return;
+        }
+      }
+    }
+
+    modeManager.setMode(mode, { source: "route" });
+  }, [location.pathname, navigate]);
 
   return null;
 }

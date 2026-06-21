@@ -90,6 +90,13 @@ function makeLooperPatch(patch, fallback = DEFAULT_LOOPER_STATE) {
 const MAX_EVENT_LOG = 300;
 const MAX_TARGETS_PER_KNOB = 3;
 const EMPTY_ARR = Object.freeze([]);
+const SNAPSHOT_VERIFIED_MODE_OPS = new Set([
+  "setPerformMode",
+  "setEditMode",
+  "setLooperMode",
+  "setAutomationMode",
+  "setTunerMode",
+]);
 
 function pushBounded(list, item, max = MAX_EVENT_LOG) {
   const next = [...(list || []), item];
@@ -444,6 +451,7 @@ export const useRfxStore = create((set, get) => ({
   },
 
   session: {
+    mode: null,
     activeBusId: null,
     activeTrackGuid: null,
     selectedTrackGuid: null,
@@ -647,6 +655,21 @@ export const useRfxStore = create((set, get) => ({
         if (kind !== name) continue;
         if (op.status !== "sent" && op.status !== "queued") continue;
 
+        if (ok && SNAPSHOT_VERIFIED_MODE_OPS.has(kind)) {
+          pendingById[opId] = {
+            ...op,
+            status: "sent",
+            commandAcknowledgedAtMs: nowMs(),
+            verify: {
+              ok: false,
+              reason: "command acknowledged; waiting for newer VM mode",
+              checkedSeq: Number(s.snapshot?.seq || 0),
+            },
+          };
+          changed = true;
+          continue;
+        }
+
         pendingById[opId] = {
           ...op,
           status: ok ? "acked" : "failed",
@@ -781,6 +804,7 @@ export const useRfxStore = create((set, get) => ({
 
         session: {
           ...s.session,
+          mode: norm.session?.mode ?? s.session.mode ?? null,
           activeBusId: effectiveActiveBusId ?? s.session.activeBusId ?? null,
           activeTrackGuid: activeGuid,
           selectedTrackGuid: selectedGuid,
@@ -1170,6 +1194,7 @@ export const useRfxStore = create((set, get) => ({
             intent: syscallCall,
             optimistic,
             createdAtMs,
+            baseSnapshotSeq: Number(s.snapshot?.seq || 0),
           },
         },
         pendingOrder: [...s.ops.pendingOrder, opId],

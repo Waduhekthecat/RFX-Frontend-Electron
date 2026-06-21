@@ -8,7 +8,9 @@ function createFallbackVm() {
     schema: "rfx_vm_v1",
     seq: 1,
     ts: nowSec(),
+    mode: "perform",
     capabilities: {
+      appModes: ["perform", "edit", "looper", "automation", "tuner"],
       routingModes: ["linear", "parallel", "lcr"],
     },
 

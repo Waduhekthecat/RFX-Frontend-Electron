@@ -1,4 +1,4 @@
-import { clamp01 } from "../DomainHelpers";
+import { clamp01 } from "../DomainHelpers.js";
 const EPSILON = 0.001;
 
 function nowMs() {

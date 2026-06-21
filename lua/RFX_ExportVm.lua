@@ -54,6 +54,14 @@ local function normalize_mode(v)
   return "linear"
 end
 
+local function normalize_app_mode(v)
+  local s = tostring(v or ""):lower()
+  if s == "perform" or s == "edit" or s == "looper" or s == "automation" or s == "tuner" then
+    return s
+  end
+  return "perform"
+end
+
 local function normalize_param_name(s)
   s = tostring(s or ""):lower()
   s = s:gsub("%s+", " ")
@@ -86,6 +94,7 @@ local function read_state()
   local raw = read_file(path)
   if not raw or raw == "" then
     return {
+      mode = "perform",
       activeBusId = "FX_1",
       busModes = {
         FX_1 = "linear",
@@ -110,6 +119,7 @@ local function read_state()
   end
 
   local s = stateOrErr
+  s.mode = normalize_app_mode(s.mode)
   if type(s.busModes) ~= "table" then
     s.busModes = {}
   end
@@ -523,7 +533,7 @@ local function collect_live_fx_params(trackIds, fxByGuid)
   return fxParamsByGuid
 end
 
-function M.export_vm()
+function M.export_vm(options)
   log_export("export_vm() begin")
 
   local trackIds = get_track_ids_in_order()
@@ -540,6 +550,9 @@ function M.export_vm()
   end
 
   local state = read_state()
+  if type(options) == "table" and options.mode ~= nil then
+    state.mode = normalize_app_mode(options.mode)
+  end
   local tracks = collect_tracks(trackIds)
   local trackMix = collect_track_mix(trackIds)
   local busMix = collect_bus_mix()
@@ -553,8 +566,10 @@ function M.export_vm()
       schema = "rfx_vm_v1",
       seq = now_ms(),
       ts = now_ms(),
+      mode = normalize_app_mode(state.mode),
 
       capabilities = {
+        appModes = { "perform", "edit", "looper", "automation", "tuner" },
         routingModes = { "linear", "parallel", "lcr" }
       },
 

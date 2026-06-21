@@ -1,5 +1,5 @@
-import { normalizeMode, canonicalTrackGuid, normBusId, findLaneGuidsForBus, nearlyEqual } from "../DomainHelpers";
-import { settleContinuousOverlays } from "./Continuous";
+import { normalizeMode, canonicalTrackGuid, normBusId, findLaneGuidsForBus, nearlyEqual } from "../DomainHelpers.js";
+import { settleContinuousOverlays } from "./Continuous.js";
 
 const OP_TIMEOUT_MS = 8000;
 
@@ -28,11 +28,20 @@ const REASONS = {
   // mismatch patterns
   ACTIVE_BUS_MISMATCH: (want, got) => `active bus mismatch: want ${want} got ${got}`,
   BUS_MODE_MISMATCH: (want, got) => `bus mode mismatch: want ${want} got ${got}`,
+  APP_MODE_MISMATCH: (want, got) => `app mode mismatch: want ${want} got ${got || "(missing)"}`,
 
   // generic
   SUPERSEDED: "superseded by newer op (collapse)",
   TIMEOUT: (ms) => `timeout after ${ms}ms`,
 };
+
+const APP_MODE_BY_OP_KIND = Object.freeze({
+  setPerformMode: "perform",
+  setEditMode: "edit",
+  setLooperMode: "looper",
+  setAutomationMode: "automation",
+  setTunerMode: "tuner",
+});
 
 // tiny helper: always return consistent verify objects
 function v(ok, reason) {
@@ -140,7 +149,6 @@ export function reconcilePending(prevState, norm) {
 
   const prevSeq = Number(prevState?.snapshot?.seq || 0);
   const nextSeq = Number(norm?.snapshot?.seq || 0);
-  const seqAdvanced = nextSeq > prevSeq;
 
   // In general: checkedSeq is "the snapshot we're currently looking at"
   const checkedSeq = nextSeq || prevSeq || 0;
@@ -189,7 +197,15 @@ export function reconcilePending(prevState, norm) {
     }
 
     // Ensure verify is written on EVERY reconcile attempt for sent ops.
-    if (op.status === "sent" && !seqAdvanced && prevSeq !== 0) {
+    const opBaseSeq = Number(op.baseSnapshotSeq || 0);
+    const snapshotIsNewerThanOp =
+      nextSeq > Math.max(prevSeq, opBaseSeq);
+
+    if (
+      op.status === "sent" &&
+      !snapshotIsNewerThanOp &&
+      (prevSeq !== 0 || opBaseSeq !== 0)
+    ) {
       nextPendingById[opId] = {
         ...op,
         verify: {
@@ -257,11 +273,22 @@ function opVerifySnapshot(op, norm) {
   const intent = op?.intent || {};
   const kind = intent.kind || intent.name || op.kind;
   const eps = getVerifyEps(kind);
+  const expectedAppMode = APP_MODE_BY_OP_KIND[kind];
 
   const tracksByGuid = norm?.entities?.tracksByGuid || {};
   const fxByGuid = norm?.entities?.fxByGuid || {};
   const fxOrderByTrackGuid = norm?.entities?.fxOrderByTrackGuid || {};
   const routesById = norm?.entities?.routesById || {};
+
+  if (expectedAppMode) {
+    const got = String(
+      norm?.snapshot?.mode ?? norm?.session?.mode ?? ""
+    ).toLowerCase();
+
+    return got === expectedAppMode
+      ? v(true, REASONS.OK)
+      : v(false, REASONS.APP_MODE_MISMATCH(expectedAppMode, got));
+  }
 
   switch (kind) {
     case "toggleRecArm": {
