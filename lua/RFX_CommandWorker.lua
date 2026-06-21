@@ -2,6 +2,7 @@ local json = dofile(reaper.GetResourcePath() .. "/Scripts/reascripts/RFX_Json.lu
 local exporter = dofile(reaper.GetResourcePath() .. "/Scripts/reascripts/RFX_ExportVm.lua")
 local installedExporter = dofile(reaper.GetResourcePath() .. "/Scripts/reascripts/RFX_ExportPluginList.lua")
 local router = dofile(reaper.GetResourcePath() .. "/Scripts/reascripts/RFX_Router.lua")
+local looper = dofile(reaper.GetResourcePath() .. "/Scripts/reascripts/RFX_LooperCmds.lua")
 
 local function get_ipc_dir()
   return "/tmp/rfx-ipc"
@@ -654,6 +655,32 @@ local function exec_refreshInstalledPlugins(_payload)
   return true
 end
 
+local function exec_setMode(modeName, payload)
+  local payloadStr = "{}"
+  local okEncode, encoded = pcall(json.encode, payload or {})
+
+  if okEncode and encoded then
+    payloadStr = tostring(encoded)
+  end
+
+  reaper.ShowConsoleMsg(
+    "[RFX] MODE switched mode=" ..
+    tostring(modeName or "unknown") ..
+    " payload=" ..
+    payloadStr ..
+    "\n"
+  )
+
+  log_debug(
+    "MODE switched mode=" ..
+    tostring(modeName or "unknown") ..
+    " payload=" ..
+    payloadStr
+  )
+
+  return true
+end
+
 local function execute_command(cmd)
   local name = tostring(cmd.name or "")
   local payload = cmd.payload or {}
@@ -678,6 +705,36 @@ local function execute_command(cmd)
     return exec_setParamValue(payload)
   elseif name == "refreshInstalledPlugins" then
     return exec_refreshInstalledPlugins(payload)
+    
+  elseif name == "setPerformMode" then
+    return exec_setMode("perform", payload)
+  elseif name == "setEditMode" then
+    return exec_setMode("edit", payload)
+  elseif name == "setLooperMode" then
+    return exec_setMode("looper", payload)
+  elseif name == "setAutomationMode" then
+    return exec_setMode("automation", payload)
+  elseif name == "setTunerMode" then
+    return exec_setMode("tuner", payload)
+    
+  elseif name == "startLooperRecord" then
+    return looper.start_record(payload)
+  elseif name == "stopLooperRecord" then
+    return looper.stop_record(payload)
+  elseif name == "startLooperPlayback" then
+    return looper.start_playback(payload)
+  elseif name == "stopLooperPlayback" then
+    return looper.stop_playback(payload)
+  elseif name == "undoLooperOverdub" then
+    return looper.undo_overdub(payload)
+  elseif name == "undoLooperRecord" then
+    return looper.undo_record(payload)
+  elseif name == "clearLooper" then
+    return looper.clear(payload)
+  elseif name == "toggleLooperType" then
+    return looper.toggle_type(payload)
+  
+  
   end
 
   return false, "unknown command: " .. name
