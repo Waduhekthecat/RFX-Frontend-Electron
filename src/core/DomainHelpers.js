@@ -130,6 +130,28 @@ export function trackVolNormToDb(norm01) {
   return 0;
 }
 
+export function trackVolDbToNorm(db) {
+  const y = Number(db);
+  if (!Number.isFinite(y)) return 0;
+  if (y <= TRACK_VOL_POINTS[0].y) return TRACK_VOL_POINTS[0].x;
+
+  const last = TRACK_VOL_POINTS[TRACK_VOL_POINTS.length - 1];
+  if (y >= last.y) return last.x;
+
+  for (let i = 0; i < TRACK_VOL_POINTS.length - 1; i++) {
+    const a = TRACK_VOL_POINTS[i];
+    const b = TRACK_VOL_POINTS[i + 1];
+
+    if (y >= a.y && y <= b.y) {
+      const span = b.y - a.y;
+      if (span <= 0) return a.x;
+      return a.x + (b.x - a.x) * ((y - a.y) / span);
+    }
+  }
+
+  return 0;
+}
+
 export function formatVolDb(db) {
   const n = Number(db);
   if (!Number.isFinite(n)) return "-inf dB";

@@ -235,6 +235,128 @@ local function find_track_by_name(name)
   return nil
 end
 
+local FX_BUS_IDS = { "FX_1", "FX_2", "FX_3", "FX_4" }
+
+local function set_master_send(track, enabled)
+  if not track then return false end
+  reaper.SetMediaTrackInfo_Value(track, "B_MAINSEND", enabled and 1 or 0)
+  return true
+end
+
+local function remove_sends_to_track(srcTrack, destTrack)
+  if not srcTrack or not destTrack then return end
+
+  local sendCount = reaper.GetTrackNumSends(srcTrack, 0)
+
+  for sendIndex = sendCount - 1, 0, -1 do
+    local existingDest = reaper.GetTrackSendInfo_Value(srcTrack, 0, sendIndex, "P_DESTTRACK")
+    if existingDest == destTrack then
+      reaper.RemoveTrackSend(srcTrack, 0, sendIndex)
+    end
+  end
+end
+
+local function ensure_send_to_track(srcTrack, destTrack)
+  if not srcTrack or not destTrack then
+    return false, "missing src or dest track"
+  end
+
+  local sendCount = reaper.GetTrackNumSends(srcTrack, 0)
+
+  for sendIndex = 0, sendCount - 1 do
+    local existingDest = reaper.GetTrackSendInfo_Value(srcTrack, 0, sendIndex, "P_DESTTRACK")
+    if existingDest == destTrack then
+      reaper.SetTrackSendInfo_Value(srcTrack, 0, sendIndex, "I_SENDMODE", 0)
+      reaper.SetTrackSendInfo_Value(srcTrack, 0, sendIndex, "D_VOL", 1.0)
+      reaper.SetTrackSendInfo_Value(srcTrack, 0, sendIndex, "D_PAN", 0.0)
+      return true
+    end
+  end
+
+  local newSendIndex = reaper.CreateTrackSend(srcTrack, destTrack)
+  if newSendIndex == nil or newSendIndex < 0 then
+    return false, "failed to create send"
+  end
+
+  reaper.SetTrackSendInfo_Value(srcTrack, 0, newSendIndex, "I_SENDMODE", 0)
+  reaper.SetTrackSendInfo_Value(srcTrack, 0, newSendIndex, "D_VOL", 1.0)
+  reaper.SetTrackSendInfo_Value(srcTrack, 0, newSendIndex, "D_PAN", 0.0)
+
+  return true
+end
+
+local function clear_fx_bus_sends_to_lp_post()
+  local lpPost = find_track_by_name("LP_POST")
+  if not lpPost then return end
+
+  for i = 1, #FX_BUS_IDS do
+    local busTrack = find_track_by_name(FX_BUS_IDS[i])
+    if busTrack then
+      remove_sends_to_track(busTrack, lpPost)
+    end
+  end
+end
+
+local function apply_perform_output_routing()
+  clear_fx_bus_sends_to_lp_post()
+
+  for i = 1, #FX_BUS_IDS do
+    local busTrack = find_track_by_name(FX_BUS_IDS[i])
+    if busTrack then
+      set_master_send(busTrack, true)
+    end
+  end
+
+  return true
+end
+
+local function apply_looper_output_routing(state)
+  local activeBusId = normalize_bus_id(state and state.activeBusId) or "FX_1"
+
+  local activeBusTrack = find_track_by_name(activeBusId)
+  if not activeBusTrack then
+    return false, "active bus track not found: " .. tostring(activeBusId)
+  end
+
+  local lpPost = find_track_by_name("LP_POST")
+  if not lpPost then
+    return false, "LP_POST track not found"
+  end
+
+  clear_fx_bus_sends_to_lp_post()
+
+  for i = 1, #FX_BUS_IDS do
+    local busId = FX_BUS_IDS[i]
+    local busTrack = find_track_by_name(busId)
+
+    if busTrack then
+      set_master_send(busTrack, busId ~= activeBusId)
+    end
+  end
+
+  local okSend, sendErr = ensure_send_to_track(activeBusTrack, lpPost)
+  if not okSend then
+    return false, sendErr or "failed to send active bus to LP_POST"
+  end
+
+  return true
+end
+
+local function apply_routing_for_app_mode(state)
+  state = state or read_state()
+
+  local okRouting, routingErr = apply_routing_from_state(state)
+  if not okRouting then
+    return false, routingErr
+  end
+
+  if state.mode == "looper" then
+    return apply_looper_output_routing(state)
+  end
+
+  return apply_perform_output_routing()
+end
+
 local function find_fx_index_by_guid(track, targetGuid)
   if not track then return nil end
   targetGuid = tostring(targetGuid or "")
@@ -390,14 +512,14 @@ local function exec_selectActiveBus(payload)
     return false, "failed to write state.json"
   end
 
-  local okRouting, routingErr = apply_routing_from_state(state)
-  if not okRouting then
-    return false, "state saved but routing apply failed: " .. tostring(routingErr or "")
-  end
+  local okRouting, routingErr = apply_routing_for_app_mode(state)
+    if not okRouting then
+      return false, "state saved but routing apply failed: " .. tostring(routingErr or "")
+    end
 
-  request_vm_export("selectActiveBus")
-  return true
-end
+    request_vm_export("selectActiveBus")
+    return true
+  end
 
 local function exec_setRoutingMode(payload)
   local busId = normalize_bus_id(payload.busId)
@@ -417,7 +539,7 @@ local function exec_setRoutingMode(payload)
     return false, "failed to write state.json"
   end
 
-  local okRouting, routingErr = apply_routing_from_state(state)
+  local okRouting, routingErr = apply_routing_for_app_mode(state)
   if not okRouting then
     return false, "state saved but routing apply failed: " .. tostring(routingErr or "")
   end
@@ -673,6 +795,27 @@ local function exec_refreshInstalledPlugins(_payload)
   return true
 end
 
+local function exec_setTempo(payload)
+  local bpm = tonumber(payload and payload.bpm)
+  if not bpm or bpm <= 0 then
+    return false, "invalid tempo bpm"
+  end
+
+  reaper.SetCurrentBPM(0, bpm, true)
+
+  local state = read_state()
+  state.tempoBpm = bpm
+  if not write_state(state) then
+    return false, "tempo updated but failed to persist state"
+  end
+
+  log_debug("TEMPO updated bpm=" .. tostring(bpm))
+  reaper.ShowConsoleMsg("[RFX] TEMPO bpm=" .. tostring(bpm) .. "\n")
+  request_vm_export("setTempo")
+
+  return true, nil, { bpm = bpm }
+end
+
 local function exec_setMode(modeName, payload)
   local mode = normalize_app_mode(modeName)
   if not mode then
@@ -686,7 +829,10 @@ local function exec_setMode(modeName, payload)
     return false, "failed to write state.json"
   end
 
-  request_vm_export("setMode:" .. mode)
+  local okRouting, routingErr = apply_routing_for_app_mode(state)
+    if not okRouting then
+      return false, "mode saved but routing apply failed: " .. tostring(routingErr or "")
+    end
 
   local payloadStr = "{}"
   local okEncode, encoded = pcall(json.encode, payload or {})
@@ -709,6 +855,8 @@ local function exec_setMode(modeName, payload)
     " payload=" ..
     payloadStr
   )
+
+  request_vm_export("setMode:" .. tostring(mode))
 
   return true, nil, { mode = mode }
 end
@@ -735,6 +883,8 @@ local function execute_command(cmd)
     return exec_getPluginParams(payload)
   elseif name == "setParamValue" then
     return exec_setParamValue(payload)
+  elseif name == "setTempo" then
+    return exec_setTempo(payload)
   elseif name == "refreshInstalledPlugins" then
     return exec_refreshInstalledPlugins(payload)
     
@@ -846,22 +996,16 @@ log_debug("Watcher started. IPC dir=" .. get_ipc_dir())
 
 do
   local s = read_state()
-  s.mode = "perform"
+  write_state(s)
 
-  if write_state(s) then
-    log_debug("app mode reset to perform at startup")
-  else
-    log_error("failed to persist perform mode at startup")
-  end
-
-  local okRouting, errRouting = apply_routing_from_state(s)
+  local okRouting, errRouting = apply_routing_for_app_mode(s)
   if okRouting then
     log_debug("routing state applied at startup")
   else
     log_error("startup routing apply failed: " .. tostring(errRouting or "unknown"))
   end
 
-  local okVm = exporter.export_vm({ mode = "perform" })
+  local okVm = exporter.export_vm()
   if okVm then
     log_debug("vm.json exported at startup")
   else

@@ -189,6 +189,16 @@ export function buildOptimistic(state, intent) {
       };
     }
 
+    case "setTempo": {
+      const bpm = Number(intent?.bpm);
+      if (!Number.isFinite(bpm)) return null;
+      return {
+        session: {
+          tempoBpm: Math.max(1, bpm),
+        },
+      };
+    }
+
     case "startLooperRecord": {
       return {
         session: {

@@ -12,6 +12,7 @@ export const CONTROL_COLORS = {
   blueActive: "border-sky-300 bg-sky-400/20 shadow-[0_0_18px_rgba(56,189,248,0.35)]",
 
   grayFaint: "border-white/15 bg-white/5 hover:border-white/25 hover:bg-white/10",
+  whiteActive: "border-white/80 bg-white/15 shadow-[0_0_18px_rgba(255,255,255,0.25)]",
   amberFaint: "border-amber-300/25 bg-amber-400/10 hover:border-amber-300/45 hover:bg-amber-400/15",
   amberActive: "border-amber-300/70 bg-amber-400/20 shadow-[0_0_18px_rgba(251,191,36,0.35)]",
   purpleFaint: "border-purple-300/25 bg-purple-400/10 hover:border-purple-300/45 hover:bg-purple-400/15",

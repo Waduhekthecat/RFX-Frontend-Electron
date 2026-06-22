@@ -31,7 +31,10 @@
  *   | { name: "reorderFx",    trackGuid: string, fromIndex: number, toIndex: number }
  *   | { name: "getPluginParams", fxGuid: string }
  *   | { name: "setParamValue", fxGuid: string, paramIdx: number, value01: number }
- *   | { name: "startLooperRecord", recordCount: number }
+ *   | { name: "setTempo", bpm: number }
+ *   | { name: "setClickEnabled", enabled: boolean }
+ *   | { name: "setCountInEnabled", enabled: boolean }
+ *   | { name: "startLooperRecord", recordCount: number, inputGain01: number }
  *   | { name: "stopLooperRecord" }
  *   | { name: "startLooperPlayback" }
  *   | { name: "stopLooperPlayback" }

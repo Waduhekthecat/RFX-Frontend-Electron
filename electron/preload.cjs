@@ -5,6 +5,8 @@ contextBridge.exposeInMainWorld("rfx", {
     boot: () => ipcRenderer.invoke("rfx:boot"),
     syscall: (call) => ipcRenderer.invoke("rfx:syscall", call),
     sendOsc: (packet) => ipcRenderer.invoke("rfx:sendOsc", packet),
+    setLooperInputGain: (payload) =>
+      ipcRenderer.invoke("rfx:setLooperInputGain", payload),
     getSnapshot: () => ipcRenderer.invoke("rfx:getSnapshot"),
     getInstalledFx: () => ipcRenderer.invoke("rfx:getInstalledFx"),
     getBootState: () => ipcRenderer.invoke("rfx:getBootState"),

@@ -13,7 +13,7 @@ const IS_DEV = !!DEV_SERVER_URL;
 const { dispatchCmdJson } = require("./ipc/dispatcher.cjs");
 const { createIpcWatchers } = require("./ipc/watchers.cjs");
 const { getIpcPaths } = require("./ipc/paths.cjs");
-const { ensureDir, readJsonSafe } = require("./ipc/jsonfile.cjs");
+const { ensureDir, readJsonSafe, writeJsonAtomic } = require("./ipc/jsonfile.cjs");
 const { createFallbackVm } = require("./ipc/mockVm.cjs");
 
 let mainWindow = null;
@@ -24,6 +24,8 @@ let watchers = null;
 let oscPort = null;
 let reaperProcess = null;
 let readinessPollTimer = null;
+let looperInputGainWrite = null;
+let pendingLooperInputGain = null;
 
 const appLaunchTimeMs = Date.now();
 let reaperLaunchTimeMs = 0;
@@ -168,10 +170,34 @@ async function clearRuntimeIpcArtifacts() {
   await Promise.all([
     removeFileIfExists(paths.vm),
     removeFileIfExists(paths.cmdresult),
+    removeFileIfExists(paths.looperInputGain),
+    removeFileIfExists(paths.looperInputGainProcessing),
   ]);
 
   liveVm = createFallbackVm();
   console.log("[RFX] cleared stale runtime IPC artifacts");
+}
+
+function scheduleLooperInputGainWrite() {
+  if (looperInputGainWrite) return;
+
+  looperInputGainWrite = (async () => {
+    const paths = getIpcPaths();
+    await ensureDir(paths.dir);
+
+    while (pendingLooperInputGain) {
+      const nextPayload = pendingLooperInputGain;
+      pendingLooperInputGain = null;
+      await writeJsonAtomic(paths.looperInputGain, nextPayload);
+    }
+  })()
+    .catch((error) => {
+      console.warn("[RFX] looper input gain write failed", error);
+    })
+    .finally(() => {
+      looperInputGainWrite = null;
+      if (pendingLooperInputGain) scheduleLooperInputGainWrite();
+    });
 }
 
 function stopReadinessPolling() {
@@ -378,6 +404,22 @@ ipcMain.handle("rfx:getInstalledFx", async () => Array.isArray(liveInstalledFx) 
 ipcMain.handle("rfx:getBootState", async () => ({ ok: true, bootState, reaperReady }));
 ipcMain.handle("rfx:syscall", async (_evt, call) => dispatchCmdJson(call));
 ipcMain.handle("rfx:sendOsc", async (_evt, packet) => sendOscPacket(packet));
+ipcMain.handle("rfx:setLooperInputGain", async (_evt, payload) => {
+  const value = Number(payload?.value01);
+  const value01 = Number.isFinite(value)
+    ? Math.max(0, Math.min(1, value))
+    : 0;
+
+  const nextPayload = {
+    ts: Date.now(),
+    busId: String(payload?.busId || ""),
+    value01,
+  };
+
+  pendingLooperInputGain = nextPayload;
+  scheduleLooperInputGainWrite();
+  return { ok: true };
+});
 
 app.whenReady().then(async () => {
   setBootState(BootState.STARTING);

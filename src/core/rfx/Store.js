@@ -569,30 +569,42 @@ export const useRfxStore = create((set, get) => ({
   setLooperTempoBpm: (tempoBpm) => {
     const nextTempoBpm = Number(tempoBpm);
     if (!Number.isFinite(nextTempoBpm)) return;
+    const normalizedTempoBpm = Math.max(1, nextTempoBpm);
     set((s) => ({
       session: {
         ...s.session,
-        tempoBpm: Math.max(1, nextTempoBpm),
+        tempoBpm: normalizedTempoBpm,
       },
     }));
+    get().logEvent("session:tempo_updated", {
+      tempoBpm: normalizedTempoBpm,
+    });
   },
 
   setLooperClickEnabled: (enabled) => {
+    const nextEnabled = !!enabled;
     set((s) => ({
       session: {
         ...s.session,
-        clickEnabled: !!enabled,
+        clickEnabled: nextEnabled,
       },
     }));
+    get().logEvent("looper:click_updated", {
+      clickEnabled: nextEnabled,
+    });
   },
 
   setLooperCountInEnabled: (enabled) => {
+    const nextEnabled = !!enabled;
     set((s) => ({
       session: {
         ...s.session,
-        countInEnabled: !!enabled,
+        countInEnabled: nextEnabled,
       },
     }));
+    get().logEvent("looper:count_in_updated", {
+      countInEnabled: nextEnabled,
+    });
   },
 
   setLooperLengthMs: (lengthMs) => {

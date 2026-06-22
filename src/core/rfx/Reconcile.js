@@ -654,6 +654,18 @@ function opVerifySnapshot(op, norm) {
         : v(false, `param mismatch: want ≈${want} got ${got}`);
     }
 
+    case "setTempo": {
+      const want = Number(intent?.bpm);
+      const got = Number(norm?.session?.tempoBpm ?? norm?.snapshot?.tempoBpm);
+
+      if (!Number.isFinite(want)) return v(false, "missing bpm");
+      if (!Number.isFinite(got)) return v(false, "tempo missing from snapshot");
+
+      return nearlyEqual(got, want, 0.01)
+        ? v(true, REASONS.OK)
+        : v(false, `tempo mismatch: want ≈${want} got ${got}`);
+    }
+
     case "syncView":
       return v(true, "syncView (no state assertion)");
 

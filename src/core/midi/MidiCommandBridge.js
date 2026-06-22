@@ -68,11 +68,6 @@ export class MidiCommandBridge {
             const state = this.pressStateByControl.get(MIDI_CONTROLS.FS_B);
             if (state) {
                 this.clearPressState(MIDI_CONTROLS.FS_B);
-                console.log("[MIDI COMMAND BRIDGE] release cleanup", {
-                    mode: state.modeAtPressStart,
-                    control: mappedEvent.control,
-                    longFired: state.longFired,
-                });
             }
             return;
         }

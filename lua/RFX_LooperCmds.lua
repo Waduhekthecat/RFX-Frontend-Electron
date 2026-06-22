@@ -8,6 +8,7 @@ local json = dofile(reaper.GetResourcePath() .. "/Scripts/reascripts/RFX_Json.lu
 local M = {}
 
 local loopRecordCount = 0
+local lpPostRecordStack = {}
 
 ----------------------------------------------------------------------
 -- BASIC HELPERS
@@ -153,7 +154,7 @@ end
 ----------------------------------------------------------------------
 
 local function ensure_repeat_enabled()
-  local repeatCmd = 1068 -- Transport: Toggle repeat
+  local repeatCmd = 1068
   local state = reaper.GetToggleCommandState(repeatCmd)
 
   if tonumber(state) ~= 1 then
@@ -170,21 +171,20 @@ local function goto_project_start()
 end
 
 local function start_recording()
-  reaper.Main_OnCommand(1013, 0) -- Transport: Record
+  reaper.Main_OnCommand(1013, 0)
 end
 
 local function stop_recording_continue_playback()
-  reaper.Main_OnCommand(1013, 0) -- Transport: Record toggle
+  reaper.Main_OnCommand(1013, 0)
 end
 
 local function start_playing()
-  reaper.Main_OnCommand(1007, 0) -- Transport: Play
+  reaper.Main_OnCommand(1007, 0)
 end
 
 local function stop_transport_and_return_to_start()
-  reaper.Main_OnCommand(1016, 0) -- Transport: Stop
+  reaper.Main_OnCommand(1016, 0)
   goto_project_start()
-
   show("[LOOPER] playback stopped")
 end
 
@@ -225,14 +225,53 @@ local function route_active_bus_to_lp_post()
 end
 
 ----------------------------------------------------------------------
--- ITEM / LOOP RANGE HELPERS
+-- ITEM / LOOP HELPERS
 ----------------------------------------------------------------------
+
+local function get_item_debug_string(item)
+  if not item then return "item=nil" end
+
+  local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
+  local len = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
+  local takeCount = reaper.CountTakes(item)
+  local guid = reaper.BR_GetMediaItemGUID and reaper.BR_GetMediaItemGUID(item) or tostring(item)
+
+  return
+    "item=" .. tostring(item) ..
+    " guid=" .. tostring(guid) ..
+    " pos=" .. tostring(pos) ..
+    " len=" .. tostring(len) ..
+    " end=" .. tostring(pos + len) ..
+    " takes=" .. tostring(takeCount)
+end
+
+local function debug_dump_lp_post_items()
+  local tr = find_track_by_name("LP_POST")
+  if not tr then
+    show("[LOOPER DEBUG] LP_POST missing")
+    return
+  end
+
+  local itemCount = reaper.CountTrackMediaItems(tr)
+
+  show("---------- LP_POST ITEMS ----------")
+  show("itemCount=" .. tostring(itemCount))
+  show("stackSize=" .. tostring(#lpPostRecordStack))
+
+  for i = 0, itemCount - 1 do
+    local item = reaper.GetTrackMediaItem(tr, i)
+    show("#" .. tostring(i) .. " " .. get_item_debug_string(item))
+  end
+
+  show("-----------------------------------")
+end
 
 local function get_latest_item_on_track(track)
   if not track then return nil end
 
   local latestItem = nil
   local latestEnd = -1
+  local latestIndex = -1
   local itemCount = reaper.CountTrackMediaItems(track)
 
   for i = 0, itemCount - 1 do
@@ -241,13 +280,74 @@ local function get_latest_item_on_track(track)
     local len = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
     local itemEnd = pos + len
 
-    if itemEnd > latestEnd then
+    if itemEnd >= latestEnd then
       latestEnd = itemEnd
+      latestIndex = i
       latestItem = item
     end
   end
 
+  if latestItem then
+    show("[LOOPER DEBUG] fallback latest item index=" .. tostring(latestIndex))
+    show("[LOOPER DEBUG] fallback latest " .. get_item_debug_string(latestItem))
+  end
+
   return latestItem
+end
+
+local function get_selected_item_on_track(track)
+  if not track then return nil end
+
+  local selectedCount = reaper.CountSelectedMediaItems(0)
+
+  for i = selectedCount - 1, 0, -1 do
+    local item = reaper.GetSelectedMediaItem(0, i)
+    local itemTrack = reaper.GetMediaItemTrack(item)
+
+    if itemTrack == track then
+      return item
+    end
+  end
+
+  return nil
+end
+
+local function push_latest_lp_post_record()
+  local lpPost = find_track_by_name("LP_POST")
+  if not lpPost then
+    show("[LOOPER STACK PUSH] failed: LP_POST missing")
+    return false
+  end
+
+  local item = get_selected_item_on_track(lpPost) or get_latest_item_on_track(lpPost)
+  if not item then
+    show("[LOOPER STACK PUSH] failed: no LP_POST item found")
+    return false
+  end
+
+  lpPostRecordStack[#lpPostRecordStack + 1] = item
+
+  show("[LOOPER STACK PUSH]")
+  show("stack size=" .. tostring(#lpPostRecordStack))
+  show(get_item_debug_string(item))
+
+  return true
+end
+
+local function pop_latest_lp_post_record()
+  local item = lpPostRecordStack[#lpPostRecordStack]
+  lpPostRecordStack[#lpPostRecordStack] = nil
+
+  show("[LOOPER STACK POP]")
+  show("stack size after pop=" .. tostring(#lpPostRecordStack))
+  show(get_item_debug_string(item))
+
+  return item
+end
+
+local function count_items_on_track(track)
+  if not track then return 0 end
+  return reaper.CountTrackMediaItems(track)
 end
 
 local function delete_all_items_on_track(trackName)
@@ -264,9 +364,45 @@ local function delete_all_items_on_track(trackName)
     reaper.DeleteTrackMediaItem(tr, item)
   end
 
+  reaper.UpdateArrange()
+
   show("[LOOPER] deleted " .. tostring(itemCount) .. " item(s) from " .. tostring(trackName))
 
   return true
+end
+
+local function delete_latest_take_or_item_on_track(trackName)
+  local tr = find_track_by_name(trackName)
+
+  if not tr then
+    return false, "missing track: " .. tostring(trackName)
+  end
+
+  debug_dump_lp_post_items()
+
+  local item = pop_latest_lp_post_record()
+  local source = "stack"
+
+  if not item or not reaper.ValidatePtr2(0, item, "MediaItem*") then
+    source = "fallback-latest"
+    item = get_latest_item_on_track(tr)
+  end
+
+  if not item then
+    return false, "no item found on " .. tostring(trackName)
+  end
+
+  show("[LOOPER UNDO DELETE]")
+  show("track=" .. tostring(trackName))
+  show("source=" .. tostring(source))
+  show(get_item_debug_string(item))
+
+  reaper.DeleteTrackMediaItem(tr, item)
+  reaper.UpdateArrange()
+
+  show("[LOOPER] deleted LP_POST item via " .. tostring(source))
+
+  return true, "item"
 end
 
 local function clear_loop_time_selection()
@@ -307,6 +443,55 @@ local function get_record_count(payload)
   return loopRecordCount
 end
 
+local function undo_latest_lp_post_recording(payload, shouldStopPlayback)
+  payload = payload or {}
+
+  if shouldStopPlayback then
+    stop_transport_and_return_to_start()
+  end
+
+  local recCount = tonumber(payload.recordCount)
+  if recCount == nil then
+    recCount = loopRecordCount
+  end
+
+  show("[LOOPER] undo payload recordCount=" .. tostring(payload.recordCount))
+  show("[LOOPER] undo resolved recCount=" .. tostring(recCount))
+
+  local okDelete, deletedOrErr = delete_latest_take_or_item_on_track("LP_POST")
+
+  if not okDelete and not shouldStopPlayback then
+    show("[LOOPER] delete while playing failed, stopping transport and retrying")
+
+    stop_transport_and_return_to_start()
+
+    okDelete, deletedOrErr = delete_latest_take_or_item_on_track("LP_POST")
+  end
+
+  if not okDelete then
+    return false, tostring(deletedOrErr or "failed to delete latest LP_POST recording")
+  end
+
+  loopRecordCount = math.max(0, recCount - 1)
+
+  local lpPost = find_track_by_name("LP_POST")
+  local remaining = count_items_on_track(lpPost)
+
+  if remaining <= 0 then
+    loopRecordCount = 0
+    lpPostRecordStack = {}
+    clear_loop_time_selection()
+    goto_project_start()
+    show("[LOOPER] no loop items remain; loop state reset")
+  end
+
+  show("[LOOPER] undo deleted latest LP_POST " .. tostring(deletedOrErr))
+  show("[LOOPER] loopRecordCount=" .. tostring(loopRecordCount))
+  show("[LOOPER] stackSize=" .. tostring(#lpPostRecordStack))
+
+  return true
+end
+
 ----------------------------------------------------------------------
 -- LOOPER COMMANDS
 ----------------------------------------------------------------------
@@ -336,6 +521,7 @@ function M.stop_record(payload)
   show("[LOOPER] recCount=" .. tostring(recCount))
 
   stop_recording_continue_playback()
+  push_latest_lp_post_record()
 
   if recCount == 0 then
     local okRange, rangeErr = set_time_selection_from_project_start_to_lp_post_item_end()
@@ -382,13 +568,13 @@ end
 function M.undo_overdub(payload)
   dump_command("undoLooperOverdub", payload)
   show("[LOOPER] undo overdub")
-  return true
+  return undo_latest_lp_post_recording(payload, false)
 end
 
 function M.undo_record(payload)
   dump_command("undoLooperRecord", payload)
   show("[LOOPER] undo record")
-  return true
+  return undo_latest_lp_post_recording(payload, true)
 end
 
 function M.clear(payload)
@@ -401,7 +587,10 @@ function M.clear(payload)
   end
 
   loopRecordCount = 0
+  lpPostRecordStack = {}
+
   show("[LOOPER] record count reset to 0")
+  show("[LOOPER] stack reset")
 
   clear_loop_time_selection()
   goto_project_start()
@@ -418,9 +607,11 @@ function M.toggle_type(payload)
   local looperType = looperTypeRaw:gsub("%-", "_")
 
   loopRecordCount = 0
+  lpPostRecordStack = {}
 
   show("[LOOPER] looper type changed to " .. tostring(looperType))
   show("[LOOPER] record count reset to 0")
+  show("[LOOPER] stack reset")
 
   return true
 end

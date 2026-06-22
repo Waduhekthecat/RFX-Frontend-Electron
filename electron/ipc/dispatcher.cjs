@@ -173,9 +173,21 @@ function makePayload(call) {
         value01: clamp01(call.value01 ?? call.value),
       };
 
+    case "setTempo":
+      return {
+        bpm: Math.max(1, Number(call.bpm) || 120),
+      };
+
+    case "setClickEnabled":
+    case "setCountInEnabled":
+      return {
+        enabled: call.enabled === true,
+      };
+
     case "startLooperRecord":
       return {
         recordCount: nonNegativeInt(call.recordCount, 0),
+        inputGain01: clamp01(call.inputGain01 ?? 1),
       };
 
     case "toggleLooperType":

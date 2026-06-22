@@ -338,6 +338,17 @@ export function createElectronTransport() {
       throw new Error("OSC bridge not wired: expected api.sendOsc or api.oscSend");
     },
 
+    async setLooperInputGain(payload) {
+      if (typeof api.setLooperInputGain !== "function") {
+        throw new Error("setLooperInputGain bridge not wired");
+      }
+
+      return api.setLooperInputGain({
+        busId: String(payload?.busId || ""),
+        value01: clamp01(payload?.value01),
+      });
+    },
+
     osc: {
       async sendTrackVolume(trackGuid, value) {
         const guid = String(trackGuid || "");
@@ -438,6 +449,40 @@ export function createElectronTransport() {
 
         throw new Error(
           "OSC bridge not wired: expected api.sendOsc / api.oscSend / api.sendBusVolumeOsc"
+        );
+      },
+
+      async sendTrackSendVolume(trackGuid, sendIndex, value) {
+        const guid = String(trackGuid || "");
+        const sendSlot0 = Number(sendIndex);
+        const vol = clamp01(value);
+
+        if (!guid || !Number.isFinite(sendSlot0) || sendSlot0 < 0) {
+          throw new Error("sendTrackSendVolume: invalid trackGuid/sendIndex");
+        }
+
+        const trackNumber = getTrackNumberFromRfxGuid(guid);
+        if (!Number.isFinite(trackNumber)) {
+          throw new Error(
+            `sendTrackSendVolume: could not resolve track number for guid ${guid}`
+          );
+        }
+
+        const address = `/track/${trackNumber}/send/${sendSlot0 + 1}/volume`;
+
+        if (typeof api.sendOsc === "function") {
+          return api.sendOsc({
+            address,
+            args: [vol],
+          });
+        }
+
+        if (typeof api.oscSend === "function") {
+          return api.oscSend(address, [vol]);
+        }
+
+        throw new Error(
+          "OSC bridge not wired: expected api.sendOsc or api.oscSend"
         );
       },
 

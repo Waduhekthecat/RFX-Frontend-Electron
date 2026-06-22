@@ -46,20 +46,20 @@ local function clamp01(n)
   return n
 end
 
-local function normalize_mode(v)
-  local s = tostring(v or ""):lower()
-  if s == "linear" or s == "parallel" or s == "lcr" then
-    return s
-  end
-  return "linear"
-end
-
 local function normalize_app_mode(v)
   local s = tostring(v or ""):lower()
   if s == "perform" or s == "edit" or s == "looper" or s == "automation" or s == "tuner" then
     return s
   end
   return "perform"
+end
+
+local function normalize_mode(v)
+  local s = tostring(v or ""):lower()
+  if s == "linear" or s == "parallel" or s == "lcr" then
+    return s
+  end
+  return "linear"
 end
 
 local function normalize_param_name(s)
@@ -89,57 +89,48 @@ local function find_track_by_name(name)
   return nil
 end
 
+local function default_state()
+  return {
+    mode = "perform",
+    activeBusId = "FX_1",
+    busModes = {
+      FX_1 = "linear",
+      FX_2 = "linear",
+      FX_3 = "linear",
+      FX_4 = "linear",
+    },
+  }
+end
+
 local function read_state()
   local path = get_ipc_dir() .. "/state.json"
   local raw = read_file(path)
+
   if not raw or raw == "" then
-    return {
-      mode = "perform",
-      activeBusId = "FX_1",
-      busModes = {
-        FX_1 = "linear",
-        FX_2 = "linear",
-        FX_3 = "linear",
-        FX_4 = "linear",
-      },
-    }
+    return default_state()
   end
 
   local okDecode, stateOrErr = pcall(json.decode, raw)
   if not okDecode or type(stateOrErr) ~= "table" then
-    return {
-      activeBusId = "FX_1",
-      busModes = {
-        FX_1 = "linear",
-        FX_2 = "linear",
-        FX_3 = "linear",
-        FX_4 = "linear",
-      },
-    }
+    return default_state()
   end
 
   local s = stateOrErr
+
   s.mode = normalize_app_mode(s.mode)
-  if type(s.busModes) ~= "table" then
-    s.busModes = {}
-  end
 
   if s.activeBusId ~= "FX_1" and s.activeBusId ~= "FX_2" and s.activeBusId ~= "FX_3" and s.activeBusId ~= "FX_4" then
     s.activeBusId = "FX_1"
   end
 
-  if s.busModes.FX_1 ~= "linear" and s.busModes.FX_1 ~= "parallel" and s.busModes.FX_1 ~= "lcr" then
-    s.busModes.FX_1 = "linear"
+  if type(s.busModes) ~= "table" then
+    s.busModes = {}
   end
-  if s.busModes.FX_2 ~= "linear" and s.busModes.FX_2 ~= "parallel" and s.busModes.FX_2 ~= "lcr" then
-    s.busModes.FX_2 = "linear"
-  end
-  if s.busModes.FX_3 ~= "linear" and s.busModes.FX_3 ~= "parallel" and s.busModes.FX_3 ~= "lcr" then
-    s.busModes.FX_3 = "linear"
-  end
-  if s.busModes.FX_4 ~= "linear" and s.busModes.FX_4 ~= "parallel" and s.busModes.FX_4 ~= "lcr" then
-    s.busModes.FX_4 = "linear"
-  end
+
+  s.busModes.FX_1 = normalize_mode(s.busModes.FX_1)
+  s.busModes.FX_2 = normalize_mode(s.busModes.FX_2)
+  s.busModes.FX_3 = normalize_mode(s.busModes.FX_3)
+  s.busModes.FX_4 = normalize_mode(s.busModes.FX_4)
 
   return s
 end
@@ -353,6 +344,50 @@ local function lane_enabled_for_mode(lane, mode)
   return false
 end
 
+local function get_track_name(track)
+  if not track then return "" end
+  local _, name = reaper.GetTrackName(track)
+  return tostring(name or "")
+end
+
+local function append_actual_sends_for_tracks(routes, srcTrackIds)
+  for i = 1, #srcTrackIds do
+    local srcId = srcTrackIds[i]
+    local srcTrack = find_track_by_name(srcId)
+
+    if srcTrack then
+      local sendCount = reaper.GetTrackNumSends(srcTrack, 0)
+
+      for sendIndex = 0, sendCount - 1 do
+        local destTrack = reaper.GetTrackSendInfo_Value(srcTrack, 0, sendIndex, "P_DESTTRACK")
+        local destId = get_track_name(destTrack)
+
+        local volRaw = reaper.GetTrackSendInfo_Value(srcTrack, 0, sendIndex, "D_VOL")
+        local volUi, volDb = reaper_vol_to_ui01(volRaw)
+
+        routes[#routes + 1] = {
+          id = srcId .. "->" .. destId,
+          category = "send",
+          trackGuid = srcId,
+          srcTrackGuid = srcId,
+          destTrackGuid = destId,
+          sendIndex = sendIndex,
+          sendMode = tonumber(reaper.GetTrackSendInfo_Value(srcTrack, 0, sendIndex, "I_SENDMODE")) or 0,
+          vol = volUi,
+          volRaw = tonumber(volRaw) or 1.0,
+          volDb = volDb,
+          pan = tonumber(reaper.GetTrackSendInfo_Value(srcTrack, 0, sendIndex, "D_PAN")) or 0.0,
+          mute = (reaper.GetTrackSendInfo_Value(srcTrack, 0, sendIndex, "B_MUTE") or 0) > 0.5,
+          phaseInvert = (reaper.GetTrackSendInfo_Value(srcTrack, 0, sendIndex, "B_PHASE") or 0) > 0.5,
+          mono = false,
+          srcChan = tonumber(reaper.GetTrackSendInfo_Value(srcTrack, 0, sendIndex, "I_SRCCHAN")) or 0,
+          dstChan = tonumber(reaper.GetTrackSendInfo_Value(srcTrack, 0, sendIndex, "I_DSTCHAN")) or 0,
+        }
+      end
+    end
+  end
+end
+
 local function collect_routes(state)
   local routes = {}
   local inputTr = find_track_by_name("INPUT")
@@ -387,7 +422,12 @@ local function collect_routes(state)
       }
     end
   end
-
+  append_actual_sends_for_tracks(routes, {
+    "FX_1",
+    "FX_2",
+    "FX_3",
+    "FX_4",
+  })
   return routes
 end
 
@@ -476,6 +516,7 @@ local function collect_live_fx_params(trackIds, fxByGuid)
 
     if tr then
       local fxCount = reaper.TrackFX_GetCount(tr)
+
       for fxIndex = 0, fxCount - 1 do
         local fxGuid = reaper.TrackFX_GetFXGUID(tr, fxIndex)
         local _, fxName = reaper.TrackFX_GetFXName(tr, fxIndex, "")
@@ -533,7 +574,7 @@ local function collect_live_fx_params(trackIds, fxByGuid)
   return fxParamsByGuid
 end
 
-function M.export_vm(options)
+function M.export_vm()
   log_export("export_vm() begin")
 
   local trackIds = get_track_ids_in_order()
@@ -550,9 +591,6 @@ function M.export_vm(options)
   end
 
   local state = read_state()
-  if type(options) == "table" and options.mode ~= nil then
-    state.mode = normalize_app_mode(options.mode)
-  end
   local tracks = collect_tracks(trackIds)
   local trackMix = collect_track_mix(trackIds)
   local busMix = collect_bus_mix()
@@ -560,17 +598,30 @@ function M.export_vm(options)
   local fxParamsByGuid = collect_live_fx_params(trackIds, fxByGuid)
   local fxOrderByTrack = build_fx_order_rows(trackIds, fxOrderByTrackGuid)
 
+  local now = now_ms()
+  local tempoBpm = tonumber(reaper.Master_GetTempo()) or 120
+
   local okVm, vmOrErr = pcall(function()
     return {
       schemaVersion = 1,
       schema = "rfx_vm_v1",
-      seq = now_ms(),
-      ts = now_ms(),
-      mode = normalize_app_mode(state.mode),
+      seq = now,
+      ts = now,
 
       capabilities = {
+        routingModes = { "linear", "parallel", "lcr" },
         appModes = { "perform", "edit", "looper", "automation", "tuner" },
-        routingModes = { "linear", "parallel", "lcr" }
+      },
+
+      mode = state.mode,
+      activeBusId = state.activeBusId,
+      tempoBpm = tempoBpm,
+
+      busModes = {
+        FX_1 = state.busModes.FX_1,
+        FX_2 = state.busModes.FX_2,
+        FX_3 = state.busModes.FX_3,
+        FX_4 = state.busModes.FX_4,
       },
 
       trackOrder = trackIds,
@@ -580,15 +631,6 @@ function M.export_vm(options)
         { id = "FX_2", label = "FX_2", busNum = 2 },
         { id = "FX_3", label = "FX_3", busNum = 3 },
         { id = "FX_4", label = "FX_4", busNum = 4 },
-      },
-
-      activeBusId = state.activeBusId,
-
-      busModes = {
-        FX_1 = state.busModes.FX_1,
-        FX_2 = state.busModes.FX_2,
-        FX_3 = state.busModes.FX_3,
-        FX_4 = state.busModes.FX_4,
       },
 
       busMix = busMix,
@@ -619,6 +661,7 @@ function M.export_vm(options)
   if okEncode and encoded then
     encoded = pretty_json(encoded)
   end
+
   if not okEncode or not encoded then
     write_file(get_ipc_dir() .. "/export_error.txt", "json.encode(vm) failed: " .. tostring(encoded))
     log_export("json.encode(vm) failed: " .. tostring(encoded))
@@ -627,6 +670,7 @@ function M.export_vm(options)
 
   local path = get_ipc_dir() .. "/vm.json"
   local okWrite = write_file(path, encoded)
+
   if not okWrite then
     write_file(get_ipc_dir() .. "/export_error.txt", "failed to write vm.json to " .. path)
     log_export("failed to write vm.json to " .. path)

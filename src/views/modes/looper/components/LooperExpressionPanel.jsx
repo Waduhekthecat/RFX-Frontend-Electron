@@ -1,29 +1,30 @@
 import { Knob } from "../../../../components/controls/knobs/Knob";
-import { CONTROL_COLORS, styles } from "../_styles";
+import { styles } from "../_styles";
 
 export function LooperExpressionPanel({
   active,
-  playbackMasterVolume,
-  formattedPlaybackMasterVolume,
+  expressionType,
+  expressionValue,
+  formattedExpressionValue,
   onExpressionChange,
 }) {
   return (
     <div
-      className={`${styles.ExpressionPanel} ${active ? CONTROL_COLORS.blueActive : CONTROL_COLORS.blueFaint}`}
+      className={`${styles.ExpressionPanel} ${active ? expressionType.activeClasses : expressionType.faintClasses}`}
     >
       <div className="mt-3 text-sm font-semibold leading-snug text-white/50">
         EXPR
       </div>
 
       <div className="mt-3 text-sm font-semibold leading-snug text-white">
-        Output
+        {expressionType.label}
       </div>
 
       <div className="mt-4 flex justify-center">
         <Knob
           id="looper-playback-master-volume"
-          label="Volume"
-          value={playbackMasterVolume}
+          label={expressionType.knobLabel}
+          value={expressionValue}
           mapped={false}
           mappedLabel=""
           onChange={onExpressionChange}
@@ -32,7 +33,7 @@ export function LooperExpressionPanel({
       </div>
 
       <div className="mt-1 text-center text-2xl font-bold tabular-nums text-white">
-        {formattedPlaybackMasterVolume}
+        {formattedExpressionValue}
       </div>
     </div>
   );
