@@ -14,16 +14,17 @@ const SMOOTH_EPS = 0.0008;
 const SNAP_EPS = 0.01;
 
 function ParamCardImpl({
-  trackGuid,
   fxGuid,
   p,
   onChange01,
   onCommit01,
-  onMap,
   onUnmap,
+  onAutomate,
   onMapDragStart,
   onMapDragEnd,
   mappedKnobs = [],
+  automated = false,
+  automationCapacityReached = false,
 }) {
   const paramIdx = Number(p?.idx ?? 0);
 
@@ -209,6 +210,27 @@ function ParamCardImpl({
 
           <button
             type="button"
+            onClick={() => onAutomate?.(liveParam || p)}
+            disabled={!automated && automationCapacityReached}
+            aria-pressed={automated}
+            className={`h-10 px-3 rounded-xl border text-[11px] font-semibold transition-colors ${
+              automated
+                ? "border-violet-300/60 bg-violet-500/25 text-violet-50 shadow-[0_0_16px_rgba(167,139,250,0.24)] hover:bg-violet-500/35"
+                : "border-white/10 bg-white/5 text-white/65 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+            }`}
+            title={
+              automated
+                ? "Remove this parameter from the automation workspace"
+                : automationCapacityReached
+                  ? "Automation workspace is full"
+                  : "Add this parameter to the automation workspace"
+            }
+          >
+            AUTOMATE
+          </button>
+
+          <button
+            type="button"
             draggable
             onDragStart={(e) => {
               if (e.dataTransfer) {
@@ -262,13 +284,15 @@ function ParamCardImpl({
 export const ParamCard = React.memo(
   ParamCardImpl,
   (prev, next) =>
-    // prev.trackGuid === next.trackGuid &&
     prev.fxGuid === next.fxGuid &&
     prev.p === next.p &&
     prev.onChange01 === next.onChange01 &&
     prev.onCommit01 === next.onCommit01 &&
+    prev.onAutomate === next.onAutomate &&
     prev.onMapDragStart === next.onMapDragStart &&
     prev.onMapDragEnd === next.onMapDragEnd &&
     prev.onUnmap === next.onUnmap &&
+    prev.automated === next.automated &&
+    prev.automationCapacityReached === next.automationCapacityReached &&
     prev.mappedKnobs === next.mappedKnobs
 );

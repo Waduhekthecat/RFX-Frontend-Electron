@@ -89,6 +89,7 @@ function makeLooperPatch(patch, fallback = DEFAULT_LOOPER_STATE) {
 
 const MAX_EVENT_LOG = 300;
 const MAX_TARGETS_PER_KNOB = 3;
+const MAX_AUTOMATABLE_PARAMETERS = 5;
 const EMPTY_ARR = Object.freeze([]);
 const SNAPSHOT_VERIFIED_MODE_OPS = new Set([
   "setPerformMode",
@@ -404,6 +405,14 @@ function sameTarget(a, b) {
   );
 }
 
+function sameAutomatableParameter(a, b) {
+  return (
+    String(a?.trackGuid || "") === String(b?.trackGuid || "") &&
+    String(a?.fxGuid || "") === String(b?.fxGuid || "") &&
+    Number(a?.paramIndex) === Number(b?.paramIndex)
+  );
+}
+
 export const useRfxStore = create((set, get) => ({
   transport: null,
   setTransport: (transport) => set({ transport }),
@@ -448,6 +457,11 @@ export const useRfxStore = create((set, get) => ({
     knobMapByBusId: {},
     mappingArmed: null,
     sliderBusVolumeMapByBusId: {},
+  },
+
+  automation: {
+    automatableParameters: [],
+    armedAutomationParameters: [],
   },
 
   session: {
@@ -515,6 +529,99 @@ export const useRfxStore = create((set, get) => ({
 
   clearEventLog: () => {
     set((s) => ({ ops: { ...s.ops, eventLog: [] } }));
+  },
+
+  addAutomatableParameter: (parameter) => {
+    if (
+      !parameter?.trackGuid ||
+      !parameter?.fxGuid ||
+      !Number.isFinite(Number(parameter?.paramIndex))
+    ) {
+      return;
+    }
+
+    set((s) => {
+      const automatableParameters = Array.isArray(
+        s.automation?.automatableParameters
+      )
+        ? s.automation.automatableParameters
+        : [];
+
+      if (
+        automatableParameters.length >= MAX_AUTOMATABLE_PARAMETERS ||
+        automatableParameters.some((entry) =>
+          sameAutomatableParameter(entry, parameter)
+        )
+      ) {
+        return s;
+      }
+
+      return {
+        automation: {
+          ...(s.automation || {}),
+          automatableParameters: [...automatableParameters, parameter],
+        },
+      };
+    });
+  },
+
+  removeAutomatableParameter: (parameter) => {
+    set((s) => {
+      const automatableParameters = Array.isArray(
+        s.automation?.automatableParameters
+      )
+        ? s.automation.automatableParameters
+        : [];
+      const nextParameters = automatableParameters.filter(
+        (entry) => !sameAutomatableParameter(entry, parameter)
+      );
+
+      if (nextParameters.length === automatableParameters.length) return s;
+
+      return {
+        automation: {
+          ...(s.automation || {}),
+          automatableParameters: nextParameters,
+          armedAutomationParameters: (
+            s.automation?.armedAutomationParameters || []
+          ).filter(
+            (entry) => !sameAutomatableParameter(entry, parameter)
+          ),
+        },
+      };
+    });
+  },
+
+  toggleArmedAutomationParameter: (parameter) => {
+    if (
+      !parameter?.trackGuid ||
+      !parameter?.fxGuid ||
+      !Number.isFinite(Number(parameter?.paramIndex))
+    ) {
+      return;
+    }
+
+    set((s) => {
+      const armedAutomationParameters = Array.isArray(
+        s.automation?.armedAutomationParameters
+      )
+        ? s.automation.armedAutomationParameters
+        : [];
+      const isArmed = armedAutomationParameters.some((entry) =>
+        sameAutomatableParameter(entry, parameter)
+      );
+
+      return {
+        automation: {
+          ...(s.automation || {}),
+          armedAutomationParameters: isArmed
+            ? armedAutomationParameters.filter(
+                (entry) => !sameAutomatableParameter(entry, parameter)
+              )
+            : [...armedAutomationParameters, parameter],
+        },
+      };
+    });
   },
 
   updateLooper: (patch) => {

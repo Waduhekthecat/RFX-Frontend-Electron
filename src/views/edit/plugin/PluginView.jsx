@@ -7,6 +7,7 @@ import { useIntent } from "../../../core/useIntent";
 import { useRfxStore } from "../../../core/rfx/Store";
 import { ParamCard } from "./components/ParamCard";
 import { KnobRow } from "../../../components/controls/knobs/KnobRow";
+import { createAutomationParameter } from "../../modes/automation/Builders";
 
 const EMPTY = Object.freeze({});
 const EMPTY_ARR = Object.freeze([]);
@@ -67,6 +68,15 @@ export function PluginView() {
 
   const commitKnobMapping = useRfxStore((s) => s.commitKnobMapping);
   const unmapParamFromBus = useRfxStore((s) => s.unmapParamFromBus);
+  const automatableParameters = useRfxStore(
+    (s) => s.automation?.automatableParameters || EMPTY_ARR
+  );
+  const addAutomatableParameter = useRfxStore(
+    (s) => s.addAutomatableParameter
+  );
+  const removeAutomatableParameter = useRfxStore(
+    (s) => s.removeAutomatableParameter
+  );
 
   const fxParamsOverlayByGuid = useRfxStore(
     (s) => s.ops?.overlay?.fxParamsByGuid || EMPTY_OBJ
@@ -107,9 +117,9 @@ export function PluginView() {
   const params = Array.isArray(manifest?.params) ? manifest.params : EMPTY_ARR;
 
   const pluginName = String(manifest?.plugin?.fxName || fx?.name || "Plugin");
-
-  const [mapParam, setMapParam] = React.useState(null);
-  const [mapInverse, setMapInverse] = React.useState(false);
+  const trackName = useRfxStore(
+    (s) => s.entities?.tracksByGuid?.[trackGuid]?.name || null
+  );
 
   const [dragMappingParam, setDragMappingParam] = React.useState(null);
   const [mapDragGlowActive, setMapDragGlowActive] = React.useState(false);
@@ -200,6 +210,27 @@ export function PluginView() {
         dragMappingParam ||
         params.find((x) => Number(x?.idx) === idx) ||
         null;
+      const paramName = String(
+        src?.uiLabel || src?.name || `Param ${idx}`
+      );
+      const isExpressionSlider = knobId === `${busId}_k7`;
+
+      if (isExpressionSlider) {
+        const expressionTargets = normalizeKnobTargets(
+          knobMapByBusId?.[busId]?.[knobId]
+        );
+        const alreadyMapped = expressionTargets.some(
+          (target) =>
+            String(target?.trackGuid || "") === String(trackGuid) &&
+            String(target?.fxGuid || "") === String(fxGuid) &&
+            Number(target?.paramIdx) === idx
+        );
+
+        if (!alreadyMapped && expressionTargets.length >= 3) {
+          setDragMappingParam(null);
+          return;
+        }
+      }
 
       commitKnobMapping?.({
         busId,
@@ -207,12 +238,25 @@ export function PluginView() {
         trackGuid,
         fxGuid,
         paramIdx: idx,
-        paramName: String(src?.uiLabel || src?.name || `Param ${idx}`),
+        paramName,
         fxName: pluginName,
-        trackName: String(trackGuid),
-        label: String(src?.uiLabel || src?.name || `Param ${idx}`),
+        trackName,
+        label: paramName,
         invert: false,
       });
+
+      if (isExpressionSlider) {
+        addAutomatableParameter?.(
+          createAutomationParameter({
+            trackGuid,
+            trackName,
+            fxGuid,
+            fxName: pluginName,
+            paramIndex: idx,
+            paramName,
+          })
+        );
+      }
 
       setDragMappingParam(null);
     },
@@ -222,7 +266,10 @@ export function PluginView() {
       fxGuid,
       params,
       commitKnobMapping,
+      knobMapByBusId,
+      addAutomatableParameter,
       trackGuid,
+      trackName,
       pluginName,
     ]
   );
@@ -304,13 +351,6 @@ export function PluginView() {
     [dispatchIntent, fxGuid, trackGuid]
   );
 
-  const onMap = React.useCallback((p) => {
-    if (!p) return;
-
-    setMapParam(p);
-    setMapInverse(false);
-  }, []);
-
   const onUnmap = React.useCallback(
     (p) => {
       const busId = String(activeBusId || "");
@@ -323,58 +363,43 @@ export function PluginView() {
     [activeBusId, unmapParamFromBus, fxGuid]
   );
 
-  const mappedParamsForExpandedView = React.useMemo(() => {
-    const busId = bottomBusId;
-    const maps = knobMapByBusId?.[busId] || EMPTY_OBJ;
-    const out = [];
+  const onAutomate = React.useCallback(
+    (p) => {
+      const paramIndex = Number(p?.idx);
+      if (!Number.isFinite(paramIndex)) return;
 
-    for (const rawTarget of Object.values(maps)) {
-      const targets = normalizeKnobTargets(rawTarget);
+      const parameter = createAutomationParameter({
+        trackGuid,
+        trackName,
+        fxGuid,
+        fxName: pluginName,
+        paramIndex,
+        paramName: String(
+          p?.uiLabel || p?.name || `Param ${paramIndex}`
+        ),
+      });
+      const automated = automatableParameters.some(
+        (entry) =>
+          String(entry?.trackGuid || "") === String(trackGuid) &&
+          String(entry?.fxGuid || "") === String(fxGuid) &&
+          Number(entry?.paramIndex) === paramIndex
+      );
 
-      for (const t of targets) {
-        if (!t?.fxGuid || !Number.isFinite(Number(t?.paramIdx))) continue;
-
-        out.push({
-          trackGuid: t.trackGuid,
-          fxGuid: String(t.fxGuid),
-          paramIdx: Number(t.paramIdx),
-          paramName: String(t.paramName || `Param ${Number(t.paramIdx)}`),
-          pluginName: String(t.fxName || "Plugin"),
-        });
+      if (automated) {
+        removeAutomatableParameter?.(parameter);
+      } else {
+        addAutomatableParameter?.(parameter);
       }
-    }
-
-    return out.sort((a, b) => a.paramName.localeCompare(b.paramName));
-  }, [bottomBusId, knobMapByBusId]);
-
-  const onMappedParamChange = React.useCallback(
-    (entry, next01) => {
-      if (!entry?.fxGuid || !Number.isFinite(Number(entry?.paramIdx))) return;
-
-      const value01 = clamp01(next01);
-      const gestureId = `mapCard:${bottomBusId}:${entry.fxGuid}:${entry.paramIdx}`;
-
-      dispatchIntent({
-        name: "setParamValue",
-        phase: "preview",
-        gestureId,
-        trackGuid: entry.trackGuid,
-        fxGuid: entry.fxGuid,
-        paramIdx: entry.paramIdx,
-        value01,
-      });
-
-      dispatchIntent({
-        name: "setParamValue",
-        phase: "commit",
-        gestureId,
-        trackGuid: entry.trackGuid,
-        fxGuid: entry.fxGuid,
-        paramIdx: entry.paramIdx,
-        value01,
-      });
     },
-    [dispatchIntent, bottomBusId]
+    [
+      addAutomatableParameter,
+      removeAutomatableParameter,
+      automatableParameters,
+      trackGuid,
+      trackName,
+      fxGuid,
+      pluginName,
+    ]
   );
 
   const bottomKnobs = React.useMemo(() => {
@@ -455,17 +480,26 @@ export function PluginView() {
               {params.map((p) => {
                 const idx = Number(p.idx);
                 const mappedKnobs = mappedKnobsByParamIdx?.[idx] || EMPTY_ARR;
+                const automated = automatableParameters.some(
+                  (entry) =>
+                    String(entry?.trackGuid || "") === String(trackGuid) &&
+                    String(entry?.fxGuid || "") === String(fxGuid) &&
+                    Number(entry?.paramIndex) === idx
+                );
 
                 return (
                   <ParamCard
                     key={p.idx}
-                    trackGuid={trackGuid}
                     fxGuid={fxGuid}
                     p={p}
                     onChange01={onParamScrub}
                     onCommit01={onParamCommit}
-                    onMap={onMap}
                     onUnmap={onUnmap}
+                    onAutomate={onAutomate}
+                    automated={automated}
+                    automationCapacityReached={
+                      automatableParameters.length >= 5
+                    }
                     mappedKnobs={mappedKnobs}
                     onMapDragStart={onMapDragStart}
                     onMapDragEnd={onMapDragEnd}

@@ -5,6 +5,7 @@ import { Knob } from "../../../components/controls/knobs/Knob";
 import { modeManager } from "../../../core/modes/ModeManager";
 import { RFX_MODES } from "../../../core/modes/Modes";
 import { useRfxStore } from "../../../core/rfx/Store";
+import { AutomatableParameterCard } from "./components/AutomatableParameterCard";
 
 const MOMENTARY_ACTIVE_MS = 350;
 const EXPRESSION_IDLE_MS = 250;
@@ -37,19 +38,11 @@ const AUTOMATION_DEBUG_BADGES = [
 
 const MOMENTARY_CONTROLS = new Set(AUTOMATION_DEBUG_BADGES.map((badge) => badge.control));
 const EMPTY_OBJ = Object.freeze({});
+const EMPTY_ARR = Object.freeze([]);
 
 const clamp01 = (value = 0) => Math.max(0, Math.min(value, 1));
 const midiValueToAutomationValue = (value = 0) => clamp01(value / 127);
 const formatAutomationValue = (value01 = 0) => `${Math.round(clamp01(value01) * 100)}%`;
-
-const formatStopwatchTime = (milliseconds = 0) => {
-  const totalSeconds = Math.floor(Math.max(milliseconds, 0) / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  const tenths = Math.floor((Math.max(milliseconds, 0) % 1000) / 100);
-
-  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${tenths}`;
-};
 
 function getKnobTargets(raw) {
   if (!raw) return [];
@@ -81,56 +74,46 @@ function AutomationControlButton({ badge, active, inactiveClasses, activeClasses
   );
 }
 
-function AutomationCurvePanel({ isRecording, isPlaying, automationDurationMs, automationPositionMs, rowTargets }) {
-  const rowCount = Math.max(1, Math.min(rowTargets.length || 1, 3));
-  const progress = automationDurationMs > 0 ? Math.min(automationPositionMs / automationDurationMs, 1) : 0;
-  const status = isRecording ? "Recording" : isPlaying ? "Playing Automation" : "Ready";
-  const durationLabel = isRecording || automationDurationMs > 0 ? "Duration" : "";
-  const durationContent = isRecording
-    ? formatStopwatchTime(automationPositionMs)
-    : automationDurationMs > 0
-      ? `${(automationDurationMs / 1000).toFixed(2)}s automation`
-      : "";
+function sameParameterTarget(parameter, target) {
+  return (
+    String(parameter?.trackGuid || "") === String(target?.trackGuid || "") &&
+    String(parameter?.fxGuid || "") === String(target?.fxGuid || "") &&
+    Number(parameter?.paramIndex ?? parameter?.paramIdx) ===
+      Number(target?.paramIndex ?? target?.paramIdx)
+  );
+}
 
+function AutomationWorkspace({
+  parameters,
+  armedParameters,
+  onRemove,
+  onToggleArmed,
+}) {
   return (
     <div className="h-full min-h-[220px] rounded-xl border border-white/10 bg-black/20 p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <div className="text-[11px] uppercase tracking-[0.18em] text-white/50">
-            Automation Curves
-          </div>
-          <div className="mt-2 text-lg font-semibold text-white">
-            {status}
-          </div>
-        </div>
-
-        <div className="text-right">
-          <div className="text-[11px] uppercase tracking-[0.18em] text-white/40">
-            {durationLabel}
-          </div>
-          <div className="mt-2 text-sm font-semibold text-white/80">
-            {durationContent}
-          </div>
-        </div>
+      <div className="text-[11px] uppercase tracking-[0.18em] text-white/50">
+        Automation Workspace
       </div>
 
-      <div className="mt-6 grid h-[calc(100%-5.5rem)] min-h-[130px] gap-3" style={{ gridTemplateRows: `repeat(${rowCount}, minmax(0, 1fr))` }}>
-        {Array.from({ length: rowCount }).map((_, index) => {
-          const target = rowTargets[index];
-          const targetLabel = target ? `${target.fxName || "FX"} • ${target.paramName || `#${target.paramIdx}`}` : "Unmapped destination";
-
-          return (
-            <div key={index} className="relative min-h-0 overflow-hidden rounded-xl border border-white/10 bg-black/30">
-              <div className="absolute left-3 top-2 z-10 text-[11px] font-semibold uppercase tracking-[0.14em] text-white/45">
-                {targetLabel}
-              </div>
-              <div className="absolute inset-x-3 top-1/2 h-px bg-white/10" />
-              <div className="absolute inset-y-0 left-0 bg-sky-300/10 transition-[width] duration-75" style={{ width: `${progress * 100}%` }} />
-              <div className="absolute inset-x-3 bottom-4 top-8 rounded-lg border border-dashed border-sky-200/15" />
-            </div>
-          );
-        })}
-      </div>
+      {parameters.length ? (
+        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
+          {parameters.slice(0, 5).map((parameter) => (
+            <AutomatableParameterCard
+              key={`${parameter.trackGuid}:${parameter.fxGuid}:${parameter.paramIndex}`}
+              parameter={parameter}
+              onRemove={onRemove}
+              onToggleArmed={onToggleArmed}
+              armed={armedParameters.some((armedParameter) =>
+                sameParameterTarget(parameter, armedParameter)
+              )}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="flex h-[calc(100%-2rem)] min-h-[150px] items-center justify-center text-sm text-white/45">
+          No automation parameters selected
+        </div>
+      )}
     </div>
   );
 }
@@ -142,11 +125,23 @@ export function AutomationView() {
   const [isRecording, setIsRecording] = React.useState(false);
   const [isPlaying, setIsPlaying] = React.useState(false);
   const [automationDurationMs, setAutomationDurationMs] = React.useState(0);
-  const [automationPositionMs, setAutomationPositionMs] = React.useState(0);
+  const [, setAutomationPositionMs] = React.useState(0);
 
   const activeBusId = useRfxStore((state) => state.perf?.activeBusId ?? state.meters?.activeBusId ?? null);
   const buses = useRfxStore((state) => state.perf?.buses ?? []);
   const knobMapByBusId = useRfxStore((state) => state.perf?.knobMapByBusId ?? EMPTY_OBJ);
+  const automatableParameters = useRfxStore(
+    (state) => state.automation?.automatableParameters ?? EMPTY_ARR
+  );
+  const removeAutomatableParameter = useRfxStore(
+    (state) => state.removeAutomatableParameter
+  );
+  const armedAutomationParameters = useRfxStore(
+    (state) => state.automation?.armedAutomationParameters ?? EMPTY_ARR
+  );
+  const toggleArmedAutomationParameter = useRfxStore(
+    (state) => state.toggleArmedAutomationParameter
+  );
 
   const releaseTimersRef = React.useRef(new Map());
   const expressionTimerRef = React.useRef(null);
@@ -162,6 +157,21 @@ export function AutomationView() {
   const mappedLabel = sliderTargets.length
     ? sliderTargets.map((target) => target.paramName || `#${target.paramIdx}`).join(" • ")
     : "";
+
+  const armDefaultParameterEnvelopesIfReady = React.useCallback(() => {
+    console.log(
+      "[RFX Automation] Selected automation parameters:",
+      armedAutomationParameters
+    );
+    console.log(
+      "[RFX Automation] Total selected automation parameters:",
+      armedAutomationParameters.length
+    );
+  }, [armedAutomationParameters]);
+
+  React.useEffect(() => {
+    armDefaultParameterEnvelopesIfReady();
+  }, [armDefaultParameterEnvelopesIfReady]);
 
   const getBadgeClasses = React.useCallback((badge) => {
     if (badge.color === "red") {
@@ -329,9 +339,11 @@ export function AutomationView() {
   }, [activateExpression, handleAutomationControl]);
 
   React.useEffect(() => {
+    const releaseTimers = releaseTimersRef.current;
+
     return () => {
-      releaseTimersRef.current.forEach((timer) => window.clearTimeout(timer));
-      releaseTimersRef.current.clear();
+      releaseTimers.forEach((timer) => window.clearTimeout(timer));
+      releaseTimers.clear();
 
       if (expressionTimerRef.current) {
         window.clearTimeout(expressionTimerRef.current);
@@ -356,12 +368,11 @@ export function AutomationView() {
             <Inset className="h-full min-h-0 p-4">
               <div className="grid h-full min-h-0 grid-cols-[repeat(4,minmax(0,1fr))_minmax(190px,0.75fr)] grid-rows-[minmax(0,1fr)_auto_auto] gap-3">
                 <div className="col-span-5 row-span-1 min-h-0">
-                  <AutomationCurvePanel
-                    isRecording={isRecording}
-                    isPlaying={isPlaying}
-                    automationDurationMs={automationDurationMs}
-                    automationPositionMs={automationPositionMs}
-                    rowTargets={sliderTargets}
+                  <AutomationWorkspace
+                    parameters={automatableParameters}
+                    armedParameters={armedAutomationParameters}
+                    onRemove={removeAutomatableParameter}
+                    onToggleArmed={toggleArmedAutomationParameter}
                   />
                 </div>
 
@@ -396,7 +407,7 @@ export function AutomationView() {
 
                   <div className="mt-4 flex justify-center">
                     <Knob
-                      id="automation-expression-preview"
+                      id={sliderKnobId}
                       label="Value"
                       value={automationValue}
                       mapped={sliderTargets.length > 0}
