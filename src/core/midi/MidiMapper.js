@@ -12,6 +12,13 @@ export const MIDI_CONTROLS = Object.freeze({
   EXPR: "EXPR",
 });
 
+export const MIDI_GESTURES = Object.freeze({
+  FS_A_LONG: "FS_A_LONG",
+  FS_B_LONG: "FS_B_LONG",
+  FS_C_LONG: "FS_C_LONG",
+  FS_D_LONG: "FS_D_LONG",
+});
+
 export const MIDI_EVENT_TYPES = Object.freeze({
   PRESS: "PRESS",
   RELEASE: "RELEASE",

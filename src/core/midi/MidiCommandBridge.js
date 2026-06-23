@@ -1,14 +1,11 @@
-import { MIDI_CONTROLS, MIDI_EVENT_TYPES } from "./MidiMapper.js";
+import {
+    MIDI_CONTROLS,
+    MIDI_EVENT_TYPES,
+    MIDI_GESTURES,
+} from "./MidiMapper.js";
 import { RFX_MODES } from "../modes/Modes.js";
 
 const LONG_PRESS_MS = 500;
-
-const MIDI_GESTURES = Object.freeze({
-    FS_A_LONG: "FS_A_LONG",
-    FS_B_LONG: "FS_B_LONG",
-    FS_C_LONG: "FS_C_LONG",
-    FS_D_LONG: "FS_D_LONG",
-});
 
 const RELEASE_TO_PHYSICAL_CONTROL = {
     [MIDI_CONTROLS.FS_A_RELEASE]: MIDI_CONTROLS.FS_A,

@@ -11,6 +11,12 @@ const MOMENTARY_ACTIVE_MS = 350;
 const EXPRESSION_IDLE_MS = 250;
 const AUTOMATION_PREVIEW_TICK_MS = 33;
 
+const AUTOMATION_GESTURES = Object.freeze({
+  FS_A_LONG: "FS_A_LONG",
+  FS_C_LONG: "FS_C_LONG",
+  FS_D_LONG: "FS_D_LONG",
+});
+
 const CONTROL_COLORS = {
   greenFaint: "border-emerald-300/25 bg-emerald-400/5 hover:border-emerald-300/45 hover:bg-emerald-400/15",
   greenActive: "border-emerald-300 bg-emerald-400/20 shadow-[0_0_18px_rgba(52,211,153,0.35)]",
@@ -30,13 +36,17 @@ const AUTOMATION_DEBUG_BADGES = [
   { control: MIDI_CONTROLS.FS_B, footswitch: "Hold FS_B", command: "Start Record", color: "green" },
   { control: MIDI_CONTROLS.FS_C, footswitch: "Tap FS_C", command: "Unassigned", color: "green" },
   { control: MIDI_CONTROLS.FS_D, footswitch: "Tap FS_D", command: "Unassigned", color: "green" },
-  { control: MIDI_CONTROLS.FS_A_LONG, footswitch: "Hold FS_A", command: "Clear Automation", color: "green" },
+  { control: AUTOMATION_GESTURES.FS_A_LONG, footswitch: "Hold FS_A", command: "Clear Automation", color: "green" },
   { control: MIDI_CONTROLS.FS_B_RELEASE, footswitch: "Release FS_B", command: "Stop Record", color: "red" },
-  { control: MIDI_CONTROLS.FS_C_LONG, footswitch: "Hold FS_C", command: "Exit Automation Mode", color: "orange" },
-  { control: MIDI_CONTROLS.FS_D_LONG, footswitch: "Hold FS_D", command: "Unassigned", color: "green" },
+  { control: AUTOMATION_GESTURES.FS_C_LONG, footswitch: "Hold FS_C", command: "Exit Automation Mode", color: "orange" },
+  { control: AUTOMATION_GESTURES.FS_D_LONG, footswitch: "Hold FS_D", command: "Unassigned", color: "green" },
 ];
 
 const MOMENTARY_CONTROLS = new Set(AUTOMATION_DEBUG_BADGES.map((badge) => badge.control));
+const DISABLED_AUTOMATION_BADGE_CONTROLS = new Set([
+  AUTOMATION_GESTURES.FS_A_LONG,
+  AUTOMATION_GESTURES.FS_D_LONG,
+]);
 const EMPTY_OBJ = Object.freeze({});
 const EMPTY_ARR = Object.freeze([]);
 
@@ -282,7 +292,7 @@ export function AutomationView() {
       recordingStartRef.current = null;
     }
 
-    if (control === MIDI_CONTROLS.FS_A_LONG) {
+    if (control === AUTOMATION_GESTURES.FS_A_LONG) {
       setIsRecording(false);
       setIsPlaying(false);
       setAutomationDurationMs(0);
@@ -291,7 +301,7 @@ export function AutomationView() {
       playbackStartRef.current = null;
     }
 
-    if (control === MIDI_CONTROLS.FS_C_LONG) {
+    if (control === AUTOMATION_GESTURES.FS_C_LONG) {
       modeManager.setMode(RFX_MODES.PERFORM, { source: "ui" });
     }
 
@@ -329,9 +339,9 @@ export function AutomationView() {
       }
 
       if (command === "AUTOMATION_PLAY_OR_STOP") handleAutomationControl(MIDI_CONTROLS.FS_A);
-      if (command === "AUTOMATION_CLEAR") handleAutomationControl(MIDI_CONTROLS.FS_A_LONG);
+      if (command === "AUTOMATION_CLEAR") handleAutomationControl(AUTOMATION_GESTURES.FS_A_LONG);
       if (command === "AUTOMATION_RECORD_OR_FINISH") handleAutomationControl(MIDI_CONTROLS.FS_D);
-      if (command === "EXIT_AUTOMATION_MODE") handleAutomationControl(MIDI_CONTROLS.FS_C_LONG);
+      if (command === "EXIT_AUTOMATION_MODE") handleAutomationControl(AUTOMATION_GESTURES.FS_C_LONG);
     };
 
     window.addEventListener("rfx-midi-command", handler);
@@ -379,6 +389,9 @@ export function AutomationView() {
                 <div className="col-span-4 row-span-2 grid grid-cols-4 grid-rows-2 gap-3 items-stretch">
                   {AUTOMATION_DEBUG_BADGES.map((badge) => {
                     const { inactiveClasses, activeClasses } = getBadgeClasses(badge);
+                    const disabled = DISABLED_AUTOMATION_BADGE_CONTROLS.has(
+                      badge.control
+                    );
 
                     return (
                       <AutomationControlButton
@@ -387,10 +400,28 @@ export function AutomationView() {
                         active={activeControls.has(badge.control)}
                         inactiveClasses={inactiveClasses}
                         activeClasses={activeClasses}
-                        onPointerDown={() => pressAutomationControl(badge.control)}
-                        onPointerUp={() => releaseAutomationControl(badge.control)}
-                        onKeyDown={(event) => handleControlKeyDown(event, badge.control)}
-                        onKeyUp={(event) => handleControlKeyUp(event, badge.control)}
+                        onPointerDown={
+                          disabled
+                            ? undefined
+                            : () => pressAutomationControl(badge.control)
+                        }
+                        onPointerUp={
+                          disabled
+                            ? undefined
+                            : () => releaseAutomationControl(badge.control)
+                        }
+                        onKeyDown={
+                          disabled
+                            ? undefined
+                            : (event) =>
+                                handleControlKeyDown(event, badge.control)
+                        }
+                        onKeyUp={
+                          disabled
+                            ? undefined
+                            : (event) =>
+                                handleControlKeyUp(event, badge.control)
+                        }
                       />
                     );
                   })}
