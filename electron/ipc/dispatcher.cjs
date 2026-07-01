@@ -1,7 +1,27 @@
 const { getIpcPaths } = require("./paths.cjs");
-const { ensureDir, writeJsonAtomic } = require("./jsonfile.cjs");
+const { ensureDir, exists, writeJsonAtomic } = require("./jsonfile.cjs");
 
 let nextCmdId = 1;
+let cmdQueue = Promise.resolve();
+
+const CMD_QUEUE_POLL_MS = 10;
+const CMD_QUEUE_TIMEOUT_MS = 10000;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForMissing(filePath, label) {
+  const startedAt = Date.now();
+
+  while (await exists(filePath)) {
+    if (Date.now() - startedAt > CMD_QUEUE_TIMEOUT_MS) {
+      throw new Error(`${label} timed out waiting for cmd.json to be consumed`);
+    }
+
+    await sleep(CMD_QUEUE_POLL_MS);
+  }
+}
 
 function clamp01(n) {
   const v = Number(n);
@@ -184,6 +204,22 @@ function makePayload(call) {
         enabled: call.enabled === true,
       };
 
+    case "setLoopLengthEnabled":
+      return {
+        enabled: call.enabled === true,
+      };
+
+    case "setLoopLength":
+      return {
+        bars: String(call.bars),
+      };
+
+    case "setTimeSignature":
+      return {
+        beatsPerMeasure: String(call.beatsPerMeasure),
+        noteLength: String(call.noteLength),
+      };
+
     case "startLooperRecord":
       return {
         recordCount: nonNegativeInt(call.recordCount, 0),
@@ -208,7 +244,7 @@ function makePayload(call) {
   }
 }
 
-async function dispatchCmdJson(call) {
+async function writeCmdJsonNow(call) {
   const c = canonicalizeCall(call);
   if (!c || !c.name) {
     return { ok: false, error: "invalid syscall" };
@@ -226,12 +262,42 @@ async function dispatchCmdJson(call) {
   };
 
   await writeJsonAtomic(paths.cmd, envelope);
+  console.log("[RFX -> cmd.json]", envelope.name, envelope.payload);
 
   return {
     ok: true,
     accepted: true,
     requestId,
   };
+}
+
+async function runQueuedCommand(call, resolve) {
+  const paths = getIpcPaths();
+
+  try {
+    await ensureDir(paths.dir);
+    await waitForMissing(paths.cmd, "before command write");
+
+    const result = await writeCmdJsonNow(call);
+    resolve(result);
+
+    if (result?.ok !== false) {
+      await waitForMissing(paths.cmd, "after command write");
+    }
+  } catch (err) {
+    resolve({
+      ok: false,
+      error: String(err?.message || err),
+    });
+  }
+}
+
+async function dispatchCmdJson(call) {
+  return new Promise((resolve) => {
+    cmdQueue = cmdQueue
+      .catch(() => {})
+      .then(() => runQueuedCommand(call, resolve));
+  });
 }
 
 module.exports = {

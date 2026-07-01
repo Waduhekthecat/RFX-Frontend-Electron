@@ -45,13 +45,23 @@ export function themeForLevel(level01) {
 }
 
 export const styles = {
-  wrapBase: "relative h-full overflow-hidden border border-white/10",
+  wrapBase:
+    "relative h-full overflow-hidden border border-white/15 bg-black/60 shadow-[inset_0_0_10px_rgba(0,0,0,0.85),0_0_10px_rgba(0,0,0,0.45)]",
   wrapEnabled: "opacity-100",
-  wrapDisabled: "opacity-35",
+  wrapDisabled: "opacity-35 saturate-50",
 
+  inner:
+    "absolute inset-[3px] overflow-hidden rounded-sm border border-black/70 bg-[linear-gradient(90deg,rgba(255,255,255,0.06),rgba(255,255,255,0.01)_30%,rgba(0,0,0,0.35)_70%,rgba(255,255,255,0.04))]",
+  segmentStack: "absolute inset-[3px] flex flex-col-reverse gap-px",
+  segment:
+    "flex-1 min-h-0 rounded-[1px] border border-black/30 transition-colors duration-75",
+  segmentIdle: "bg-white/[0.045]",
+  segmentGreen: "bg-green-400 shadow-[0_0_5px_rgba(74,222,128,0.55)]",
+  segmentYellow: "bg-yellow-300 shadow-[0_0_5px_rgba(250,204,21,0.55)]",
+  segmentRed: "bg-red-400 shadow-[0_0_5px_rgba(248,113,113,0.55)]",
+  gridLines:
+    "absolute inset-[3px] pointer-events-none bg-[repeating-linear-gradient(0deg,rgba(0,0,0,0.70)_0px,rgba(0,0,0,0.70)_1px,transparent_1px,transparent_5px)] opacity-60",
   glow: "absolute inset-0 pointer-events-none",
-  fill: "absolute left-0 right-0 bottom-0",
-  cap: "absolute left-0 right-0 pointer-events-none",
-  peak: "absolute left-0 right-0 pointer-events-none",
-  clip: "absolute top-1 left-1 right-1 h-3 rounded pointer-events-none",
+  peak: "absolute left-[3px] right-[3px] pointer-events-none rounded-full",
+  clip: "absolute top-[3px] left-[4px] right-[4px] h-1.5 rounded-full pointer-events-none",
 };

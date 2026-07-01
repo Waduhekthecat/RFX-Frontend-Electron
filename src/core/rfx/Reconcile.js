@@ -666,6 +666,35 @@ function opVerifySnapshot(op, norm) {
         : v(false, `tempo mismatch: want ≈${want} got ${got}`);
     }
 
+    case "setLoopLengthEnabled": {
+      const want = !!intent?.enabled;
+      const got = norm?.session?.looper?.loopLengthEnabled;
+      return typeof got === "boolean" && got === want
+        ? v(true, REASONS.OK)
+        : v(false, `loop length enabled mismatch: want ${want} got ${got}`);
+    }
+
+    case "setLoopLength": {
+      const want = Number(intent?.bars);
+      const got = Number(norm?.session?.looper?.loopLength);
+      return Number.isFinite(got) && got === want
+        ? v(true, REASONS.OK)
+        : v(false, `loop length mismatch: want ${want} got ${got}`);
+    }
+
+    case "setTimeSignature": {
+      const wantBeats = Number(intent?.beatsPerMeasure);
+      const wantNoteLength = Number(intent?.noteLength);
+      const gotBeats = Number(norm?.session?.beatsPerMeasure);
+      const gotNoteLength = Number(norm?.session?.noteLength);
+      return gotBeats === wantBeats && gotNoteLength === wantNoteLength
+        ? v(true, REASONS.OK)
+        : v(
+          false,
+          `time signature mismatch: want ${wantBeats}/${wantNoteLength} got ${gotBeats}/${gotNoteLength}`
+        );
+    }
+
     case "syncView":
       return v(true, "syncView (no state assertion)");
 

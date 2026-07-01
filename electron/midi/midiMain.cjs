@@ -15,12 +15,6 @@ function initMidiMain(mainWindow) {
 
   const portCount = input.getPortCount();
 
-  console.log(`[MIDI] Found ${portCount} input ports.`);
-
-  for (let i = 0; i < portCount; i++) {
-    console.log(`[MIDI] Input ${i}: ${input.getPortName(i)}`);
-  }
-
   if (portCount === 0) {
     console.warn("[MIDI] No MIDI input devices found.");
     return;
@@ -38,16 +32,12 @@ function initMidiMain(mainWindow) {
 
     if (!event) return;
 
-    console.log("[MIDI]", event);
-
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send("midi:message", event);
     }
   });
 
   input.openPort(selectedPort);
-
-  console.log(`[MIDI] Listening on: ${selectedPortName}`);
 }
 
 function normalizeMidiMessage(message, meta = {}) {

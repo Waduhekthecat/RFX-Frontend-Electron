@@ -199,6 +199,28 @@ export function buildOptimistic(state, intent) {
       };
     }
 
+    case "setLoopLengthEnabled":
+      return {
+        session: {
+          looper: { loopLengthEnabled: !!intent?.enabled },
+        },
+      };
+
+    case "setLoopLength":
+      return {
+        session: {
+          looper: { loopLength: Number(intent?.bars) },
+        },
+      };
+
+    case "setTimeSignature":
+      return {
+        session: {
+          beatsPerMeasure: Number(intent?.beatsPerMeasure),
+          noteLength: Number(intent?.noteLength),
+        },
+      };
+
     case "startLooperRecord": {
       return {
         session: {
@@ -233,6 +255,16 @@ export function buildOptimistic(state, intent) {
       };
 
     case "undoLooperRecord":
+      return {
+        session: {
+          looper: {
+            status: "idle",
+            lengthMs: 0,
+            recordCount: 0,
+          },
+        },
+      };
+
     case "clearLooper":
       return {
         session: {
@@ -240,6 +272,8 @@ export function buildOptimistic(state, intent) {
             status: "idle",
             lengthMs: 0,
             recordCount: 0,
+            loopLengthEnabled: false,
+            loopLength: 4,
           },
         },
       };

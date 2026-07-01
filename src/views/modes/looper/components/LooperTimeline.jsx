@@ -26,6 +26,15 @@ export function LooperTimeline({
   onToggleClick,
   isCountInEnabled,
   onToggleCountIn,
+  loopLengthEnabled,
+  isLoopLengthLocked,
+  loopLength,
+  onToggleLoopLength,
+  onCycleLoopLength,
+  beatsPerMeasure,
+  noteLength,
+  onCycleBeatsPerMeasure,
+  onCycleNoteLength,
 }) {
   const progress =
     hasRecordedLoop && loopDurationMs > 0
@@ -62,41 +71,93 @@ export function LooperTimeline({
 
   return (
     <div className="flex h-full min-h-[220px] flex-col rounded-xl border border-white/10 bg-black/20 p-4">
-      <div className="grid flex-1 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-stretch gap-3">
+      <div className="grid flex-1 grid-cols-[minmax(180px,1.35fr)_auto_minmax(0,0.65fr)] items-stretch gap-3">
         <div className="min-w-0 self-start">
           <div className="text-[11px] uppercase tracking-[0.18em] text-white/50">
             Loop Timeline
           </div>
-          <div className="mt-2 text-lg font-semibold text-white">{status}</div>
+          <div className="mt-2 whitespace-nowrap text-lg font-semibold text-white">
+            {status}
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-stretch justify-center gap-2">
-          <div className={`flex h-[64px] w-[92px] items-center justify-center rounded-xl border px-3 py-2 text-sm font-semibold tabular-nums text-sky-100 ${CONTROL_COLORS.blueFaint}`}>
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          <div className={`flex h-[56px] w-[92px] items-center justify-center rounded-xl border px-3 py-2 text-sm font-semibold tabular-nums text-white/65 ${CONTROL_COLORS.grayFaint}`}>
             {tempoBpm} BPM
           </div>
           <button
             type="button"
             onClick={onTapTempo}
-            className={`h-full min-h-[72px] w-[92px] shrink-0 rounded-xl border px-5 py-3 text-base font-semibold text-white transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-300/70 ${isTapTempoActive ? CONTROL_COLORS.blueActive : CONTROL_COLORS.blueFaint}`}
+            className={`h-[56px] w-[92px] shrink-0 rounded-xl border px-5 py-2 text-base font-semibold text-white transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-300/70 ${isTapTempoActive ? CONTROL_COLORS.blueActive : CONTROL_COLORS.blueFaint}`}
           >
             TAP
           </button>
-          <button
-            type="button"
-            onClick={onToggleClick}
-            aria-pressed={isClickEnabled}
-            className={`h-full min-h-[72px] w-[116px] shrink-0 rounded-xl border px-5 py-3 text-sm font-semibold text-white transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70 ${isClickEnabled ? CONTROL_COLORS.amberActive : CONTROL_COLORS.grayFaint}`}
+          <div
+            className={`flex h-[56px] shrink-0 overflow-hidden rounded-xl border transition-all duration-150 ${isClickEnabled ? "border-amber-300/45 bg-amber-400/5" : "border-white/10 bg-white/[0.03]"}`}
           >
-            CLICK {isClickEnabled ? "ON" : "OFF"}
-          </button>
-          <button
-            type="button"
-            onClick={onToggleCountIn}
-            aria-pressed={isCountInEnabled}
-            className={`h-full min-h-[72px] w-[148px] shrink-0 rounded-xl border px-5 py-3 text-sm font-semibold text-white transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-300/70 ${isCountInEnabled ? CONTROL_COLORS.purpleActive : CONTROL_COLORS.grayFaint}`}
+            <button
+              type="button"
+              onClick={onToggleClick}
+              aria-pressed={isClickEnabled}
+              className={`w-[92px] border-r border-white/10 px-3 py-2 text-sm font-semibold text-white transition-all duration-150 focus:outline-none focus-visible:bg-amber-300/15 ${isClickEnabled ? CONTROL_COLORS.amberActive : CONTROL_COLORS.grayFaint}`}
+            >
+              CLICK
+            </button>
+            <button
+              type="button"
+              onClick={onToggleCountIn}
+              disabled={!isClickEnabled}
+              aria-disabled={!isClickEnabled}
+              aria-pressed={isCountInEnabled}
+              className={`w-[128px] px-3 py-2 text-sm font-semibold text-white transition-all duration-150 focus:outline-none focus-visible:bg-purple-300/15 ${isClickEnabled ? (isCountInEnabled ? CONTROL_COLORS.purpleActive : CONTROL_COLORS.grayFaint) : "cursor-not-allowed bg-white/[0.02] text-white/35"}`}
+            >
+              COUNT-IN
+            </button>
+          </div>
+          <div
+            className={`flex h-[56px] shrink-0 overflow-hidden rounded-xl border transition-all duration-150 ${loopLengthEnabled ? "border-emerald-300/45 bg-emerald-400/5" : "border-white/10 bg-white/[0.03]"}`}
           >
-            COUNT-IN {isCountInEnabled ? "ON" : "OFF"}
-          </button>
+            <button
+              type="button"
+              onClick={onToggleLoopLength}
+              disabled={isLoopLengthLocked}
+              aria-disabled={isLoopLengthLocked}
+              aria-pressed={loopLengthEnabled}
+              className={`w-[104px] border-r border-white/10 px-3 py-2 text-sm font-semibold text-white transition-all duration-150 focus:outline-none focus-visible:bg-emerald-300/15 ${isLoopLengthLocked ? "cursor-not-allowed opacity-60" : ""} ${loopLengthEnabled ? CONTROL_COLORS.greenActive : CONTROL_COLORS.grayFaint}`}
+            >
+              LENGTH
+            </button>
+            <button
+              type="button"
+              onClick={onCycleLoopLength}
+              disabled={!loopLengthEnabled}
+              aria-disabled={!loopLengthEnabled}
+              className={`w-[92px] px-3 py-2 text-sm font-semibold text-white transition-all duration-150 focus:outline-none focus-visible:bg-emerald-300/15 ${loopLengthEnabled ? CONTROL_COLORS.greenFaint : "cursor-not-allowed bg-white/[0.02] text-white/35"}`}
+            >
+              {loopLength} BARS
+            </button>
+          </div>
+          <div className="flex h-[56px] shrink-0 overflow-hidden rounded-xl border border-sky-300/25 bg-sky-400/5">
+            <div className="flex w-[48px] items-center justify-center border-r border-white/10 px-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-sky-100/60">
+              Time
+            </div>
+            <button
+              type="button"
+              onClick={onCycleBeatsPerMeasure}
+              aria-label={`Beats per measure: ${beatsPerMeasure}`}
+              className="w-[54px] border-r border-white/10 text-xl font-semibold tabular-nums text-sky-100 transition-colors hover:bg-sky-300/10 focus:outline-none focus-visible:bg-sky-300/15"
+            >
+              {beatsPerMeasure}
+            </button>
+            <button
+              type="button"
+              onClick={onCycleNoteLength}
+              aria-label={`Note length: ${noteLength}`}
+              className="w-[54px] text-xl font-semibold tabular-nums text-sky-100 transition-colors hover:bg-sky-300/10 focus:outline-none focus-visible:bg-sky-300/15"
+            >
+              {noteLength}
+            </button>
+          </div>
         </div>
 
         <div className="flex min-w-0 items-start justify-end gap-3 self-start">

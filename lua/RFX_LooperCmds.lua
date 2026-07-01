@@ -8,7 +8,9 @@ local json = dofile(reaper.GetResourcePath() .. "/Scripts/reascripts/RFX_Json.lu
 local M = {}
 
 local loopRecordCount = 0
-local lpPostRecordStack = {}
+local loopRecordStack = {}
+local loopLengthBars = nil
+local originalLpPreGuid = nil
 
 ----------------------------------------------------------------------
 -- BASIC HELPERS
@@ -22,8 +24,28 @@ local function now_ms()
   return math.floor(reaper.time_precise() * 1000)
 end
 
+local function reaper_log(target, name, _payload)
+  reaper.ShowConsoleMsg(
+    "[REAPER -> " ..
+    tostring(target or "") ..
+    "] " ..
+    tostring(name or "") ..
+    "\n"
+  )
+end
+
 local function show(msg)
-  reaper.ShowConsoleMsg(tostring(msg) .. "\n")
+  -- Intentionally quiet. Public command handlers log one normalized line via dump_command().
+  return msg
+end
+
+local function normalize_looper_type(value)
+  local s = tostring(value or ""):lower():gsub("%-", "_")
+
+  if s == "pre_fx" then return "pre_fx" end
+  if s == "post_fx" then return "post_fx" end
+
+  return nil
 end
 
 local function read_file(path)
@@ -47,34 +69,45 @@ local function read_json(path)
   return decoded
 end
 
-local function read_active_bus_id()
+local function read_state()
   local state = read_json(get_ipc_dir() .. "/state.json")
+  if type(state) ~= "table" then return {} end
+  return state
+end
 
-  if type(state) == "table" and state.activeBusId then
-    return tostring(state.activeBusId)
-  end
+local function read_looper_type()
+  local state = read_state()
+  return normalize_looper_type(state.looperType) or "post_fx"
+end
 
-  return "FX_1"
+local function is_count_in_enabled()
+  local state = read_state()
+  return state.countInEnabled == true
+end
+
+local function get_track_name_for_looper_type(looperType)
+  if looperType == "pre_fx" then return "LP_PRE" end
+  return "LP_POST"
+end
+
+local function get_record_track_name()
+  local looperType = read_looper_type()
+  return get_track_name_for_looper_type(looperType), looperType
 end
 
 local function dump_command(name, payload)
-  payload = payload or {}
+  payload = type(payload) == "table" and payload or {}
+  local trackName, looperType = get_record_track_name()
+  local out = {}
 
-  show("")
-  show("========================================")
-  show("[RFX LOOPER COMMAND]")
-  show("ts: " .. tostring(now_ms()))
-  show("name: " .. tostring(name or ""))
-
-  if payload.recordCount ~= nil then
-    show("recordCount: " .. tostring(payload.recordCount))
+  for k, v in pairs(payload) do
+    out[k] = v
   end
 
-  if payload.looperType ~= nil then
-    show("looperType: " .. tostring(payload.looperType))
-  end
+  out.looperType = looperType
+  out.recordTrack = trackName
 
-  show("========================================")
+  reaper_log("looper", name, out)
 end
 
 ----------------------------------------------------------------------
@@ -102,55 +135,42 @@ local function get_track_name(track)
   return tostring(name or "")
 end
 
-local function arm_output_stereo(trackName)
-  local tr = find_track_by_name(trackName)
+local function get_track_guid(track)
+  if not track then return nil end
+  return reaper.GetTrackGUID(track)
+end
 
+local function count_items_on_track(track)
+  if not track then return 0 end
+  return reaper.CountTrackMediaItems(track)
+end
+
+local function select_track(track)
+  if not track then return end
+
+  reaper.Main_OnCommand(40297, 0)
+  reaper.SetTrackSelected(track, true)
+end
+
+local function cache_original_lp_pre_guid()
+  if originalLpPreGuid then
+    return originalLpPreGuid
+  end
+
+  local tr = find_track_by_name("LP_PRE")
   if not tr then
-    show("[LOOPER] ERROR missing record target track: " .. tostring(trackName))
-    return false
+    return nil
   end
 
-  reaper.SetMediaTrackInfo_Value(tr, "B_MUTE", 0)
-  reaper.SetMediaTrackInfo_Value(tr, "I_RECARM", 1)
-  reaper.SetMediaTrackInfo_Value(tr, "I_RECMODE", 1)
+  originalLpPreGuid = get_track_guid(tr)
 
-  show("[LOOPER] armed output stereo: " .. trackName)
-  return true
-end
+  show("[LOOPER] cached original LP_PRE guid=" .. tostring(originalLpPreGuid))
 
-local function create_send(sourceTrack, destTrack)
-  if not sourceTrack or not destTrack then return false end
-
-  local sendIndex = reaper.CreateTrackSend(sourceTrack, destTrack)
-
-  if sendIndex == nil or sendIndex < 0 then
-    return false
-  end
-
-  reaper.SetTrackSendInfo_Value(sourceTrack, 0, sendIndex, "D_VOL", 1.0)
-  reaper.SetTrackSendInfo_Value(sourceTrack, 0, sendIndex, "B_MUTE", 0)
-
-  show("[LOOPER] send: " .. get_track_name(sourceTrack) .. " -> " .. get_track_name(destTrack))
-  return true
-end
-
-local function remove_sends_to_track(sourceTrack, destTrack)
-  if not sourceTrack or not destTrack then return false end
-
-  local sendCount = reaper.GetTrackNumSends(sourceTrack, 0)
-
-  for sendIndex = sendCount - 1, 0, -1 do
-    local existingDest = reaper.GetTrackSendInfo_Value(sourceTrack, 0, sendIndex, "P_DESTTRACK")
-    if existingDest == destTrack then
-      reaper.RemoveTrackSend(sourceTrack, 0, sendIndex)
-    end
-  end
-
-  return true
+  return originalLpPreGuid
 end
 
 ----------------------------------------------------------------------
--- REAPER TRANSPORT HELPERS
+-- REAPER TRANSPORT / PRE-ROLL HELPERS
 ----------------------------------------------------------------------
 
 local function ensure_repeat_enabled()
@@ -188,44 +208,87 @@ local function stop_transport_and_return_to_start()
   show("[LOOPER] playback stopped")
 end
 
-----------------------------------------------------------------------
--- ROUTING HELPERS
-----------------------------------------------------------------------
+local function is_transport_stopped()
+  return tonumber(reaper.GetPlayState()) == 0
+end
 
-local function route_active_bus_to_lp_post()
-  local activeBusId = read_active_bus_id()
-  local busTrack = find_track_by_name(activeBusId)
-  local lpPost = find_track_by_name("LP_POST")
+local function has_bit(value, bit)
+  value = tonumber(value) or 0
+  bit = tonumber(bit) or 0
+  if bit <= 0 then return false end
+  return value % (bit * 2) >= bit
+end
 
-  if not busTrack then
-    return false, "missing active bus track: " .. tostring(activeBusId)
+local function set_bit(value, bit, enabled)
+  value = tonumber(value) or 0
+
+  local alreadyEnabled = has_bit(value, bit)
+
+  if enabled and not alreadyEnabled then
+    return value + bit
   end
 
-  if not lpPost then
-    return false, "missing LP_POST track"
+  if not enabled and alreadyEnabled then
+    return value - bit
   end
 
-  show("[LOOPER] routing active bus to LP_POST")
-  show("[LOOPER] activeBusId=" .. tostring(activeBusId))
+  return value
+end
 
-  reaper.SetMediaTrackInfo_Value(busTrack, "B_MAINSEND", 0)
-  show("[LOOPER] disabled master send: " .. tostring(activeBusId))
-
-  remove_sends_to_track(busTrack, lpPost)
-
-  if not create_send(busTrack, lpPost) then
-    return false, "failed to create send: " .. tostring(activeBusId) .. " -> LP_POST"
+local function set_preroll_before_recording_enabled(enabled)
+  if not reaper.SNM_GetIntConfigVar or not reaper.SNM_SetIntConfigVar then
+    show("[LOOPER PREROLL] SWS SNM config functions unavailable; cannot set pre-roll")
+    return false, "SWS extension required for pre-roll config"
   end
 
-  if not arm_output_stereo("LP_POST") then
-    return false, "failed to arm LP_POST"
+  local current = reaper.SNM_GetIntConfigVar("preroll", -1)
+
+  if current == nil or tonumber(current) < 0 then
+    show("[LOOPER PREROLL] failed to read preroll config var")
+    return false, "failed to read preroll config var"
   end
+
+  local nextValue = set_bit(current, 2, enabled == true)
+
+  if nextValue ~= current then
+    reaper.SNM_SetIntConfigVar("preroll", nextValue)
+  end
+
+  show(
+    "[LOOPER PREROLL] before_recording=" ..
+    tostring(enabled == true) ..
+    " current=" ..
+    tostring(current) ..
+    " next=" ..
+    tostring(nextValue)
+  )
 
   return true
 end
 
+local function arm_preroll_if_needed()
+  local countInEnabled = is_count_in_enabled()
+  local stopped = is_transport_stopped()
+  local shouldArm = countInEnabled and stopped
+
+  show("[LOOPER PREROLL] countInEnabled=" .. tostring(countInEnabled))
+  show("[LOOPER PREROLL] transportStopped=" .. tostring(stopped))
+  show("[LOOPER PREROLL] shouldArm=" .. tostring(shouldArm))
+
+  if shouldArm then
+    return set_preroll_before_recording_enabled(true)
+  end
+
+  set_preroll_before_recording_enabled(false)
+  return true
+end
+
+local function unarm_preroll()
+  return set_preroll_before_recording_enabled(false)
+end
+
 ----------------------------------------------------------------------
--- ITEM / LOOP HELPERS
+-- ITEM HELPERS
 ----------------------------------------------------------------------
 
 local function get_item_debug_string(item)
@@ -245,18 +308,19 @@ local function get_item_debug_string(item)
     " takes=" .. tostring(takeCount)
 end
 
-local function debug_dump_lp_post_items()
-  local tr = find_track_by_name("LP_POST")
+local function debug_dump_loop_items(trackName)
+  local tr = find_track_by_name(trackName)
+
   if not tr then
-    show("[LOOPER DEBUG] LP_POST missing")
+    show("[LOOPER DEBUG] " .. tostring(trackName) .. " missing")
     return
   end
 
   local itemCount = reaper.CountTrackMediaItems(tr)
 
-  show("---------- LP_POST ITEMS ----------")
+  show("---------- " .. tostring(trackName) .. " ITEMS ----------")
   show("itemCount=" .. tostring(itemCount))
-  show("stackSize=" .. tostring(#lpPostRecordStack))
+  show("stackSize=" .. tostring(#loopRecordStack))
 
   for i = 0, itemCount - 1 do
     local item = reaper.GetTrackMediaItem(tr, i)
@@ -312,42 +376,53 @@ local function get_selected_item_on_track(track)
   return nil
 end
 
-local function push_latest_lp_post_record()
-  local lpPost = find_track_by_name("LP_POST")
-  if not lpPost then
-    show("[LOOPER STACK PUSH] failed: LP_POST missing")
+local function push_latest_loop_record()
+  local trackName, looperType = get_record_track_name()
+  local tr = find_track_by_name(trackName)
+
+  if not tr then
+    show("[LOOPER STACK PUSH] failed: " .. tostring(trackName) .. " missing")
     return false
   end
 
-  local item = get_selected_item_on_track(lpPost) or get_latest_item_on_track(lpPost)
+  local item = get_selected_item_on_track(tr) or get_latest_item_on_track(tr)
+
   if not item then
-    show("[LOOPER STACK PUSH] failed: no LP_POST item found")
+    show("[LOOPER STACK PUSH] failed: no " .. tostring(trackName) .. " item found")
     return false
   end
 
-  lpPostRecordStack[#lpPostRecordStack + 1] = item
+  loopRecordStack[#loopRecordStack + 1] = {
+    item = item,
+    trackName = trackName,
+    looperType = looperType,
+  }
 
   show("[LOOPER STACK PUSH]")
-  show("stack size=" .. tostring(#lpPostRecordStack))
+  show("looperType=" .. tostring(looperType))
+  show("recordTrack=" .. tostring(trackName))
+  show("stack size=" .. tostring(#loopRecordStack))
   show(get_item_debug_string(item))
 
   return true
 end
 
-local function pop_latest_lp_post_record()
-  local item = lpPostRecordStack[#lpPostRecordStack]
-  lpPostRecordStack[#lpPostRecordStack] = nil
+local function pop_latest_loop_record()
+  local entry = loopRecordStack[#loopRecordStack]
+  loopRecordStack[#loopRecordStack] = nil
 
   show("[LOOPER STACK POP]")
-  show("stack size after pop=" .. tostring(#lpPostRecordStack))
-  show(get_item_debug_string(item))
+  show("stack size after pop=" .. tostring(#loopRecordStack))
 
-  return item
-end
+  if entry then
+    show("looperType=" .. tostring(entry.looperType))
+    show("recordTrack=" .. tostring(entry.trackName))
+    show(get_item_debug_string(entry.item))
+  else
+    show("entry=nil")
+  end
 
-local function count_items_on_track(track)
-  if not track then return 0 end
-  return reaper.CountTrackMediaItems(track)
+  return entry
 end
 
 local function delete_all_items_on_track(trackName)
@@ -371,20 +446,144 @@ local function delete_all_items_on_track(trackName)
   return true
 end
 
-local function delete_latest_take_or_item_on_track(trackName)
+local function get_original_lp_pre_track()
+  local keepGuid = cache_original_lp_pre_guid()
+
+  if keepGuid then
+    for i = 0, reaper.CountTracks(0) - 1 do
+      local tr = reaper.GetTrack(0, i)
+      if get_track_name(tr) == "LP_PRE" and get_track_guid(tr) == keepGuid then
+        return tr
+      end
+    end
+  end
+
+  return find_track_by_name("LP_PRE")
+end
+
+local function get_latest_copied_lp_pre_track()
+  local keepGuid = cache_original_lp_pre_guid()
+  local latest = nil
+
+  for i = 0, reaper.CountTracks(0) - 1 do
+    local tr = reaper.GetTrack(0, i)
+    local name = get_track_name(tr)
+    local guid = get_track_guid(tr)
+
+    if name == "LP_PRE" and guid ~= keepGuid then
+      latest = tr
+    end
+  end
+
+  return latest
+end
+
+local function clear_original_lp_pre_audio_and_select()
+  local tr = get_original_lp_pre_track()
+
+  if not tr then
+    return false, "original LP_PRE track not found"
+  end
+
+  local itemCount = reaper.CountTrackMediaItems(tr)
+
+  for i = itemCount - 1, 0, -1 do
+    local item = reaper.GetTrackMediaItem(tr, i)
+    reaper.DeleteTrackMediaItem(tr, item)
+  end
+
+  select_track(tr)
+  goto_project_start()
+  reaper.UpdateArrange()
+
+  show("[LOOPER] cleared original LP_PRE audio")
+  show("[LOOPER] selected original LP_PRE")
+  show("[LOOPER] playhead reset to project start")
+
+  return true
+end
+
+local function undo_pre_fx_latest_overdub()
+  unarm_preroll()
+
+  local copiedTrack = get_latest_copied_lp_pre_track()
+
+  if copiedTrack then
+    show("[LOOPER PRE UNDO] deleting latest copied LP_PRE guid=" .. tostring(get_track_guid(copiedTrack)))
+    reaper.DeleteTrack(copiedTrack)
+  else
+    show("[LOOPER PRE UNDO] no copied LP_PRE track found")
+  end
+
+  local ok, err = clear_original_lp_pre_audio_and_select()
+  if not ok then
+    return false, err
+  end
+
+  loopRecordCount = math.max(0, loopRecordCount - 1)
+
+  show("[LOOPER PRE UNDO] loopRecordCount=" .. tostring(loopRecordCount))
+
+  return true
+end
+
+local function clear_pre_fx_loop_audio()
+  local keepGuid = cache_original_lp_pre_guid()
+
+  if not keepGuid then
+    return false, "LP_PRE track not found; could not cache original guid"
+  end
+
+  local deletedTracks = 0
+
+  for i = reaper.CountTracks(0) - 1, 0, -1 do
+    local tr = reaper.GetTrack(0, i)
+    local name = get_track_name(tr)
+    local guid = get_track_guid(tr)
+
+    if name == "LP_PRE" and guid ~= keepGuid then
+      show("[LOOPER] deleting copied LP_PRE track guid=" .. tostring(guid))
+      reaper.DeleteTrack(tr)
+      deletedTracks = deletedTracks + 1
+    end
+  end
+
+  local ok, err = clear_original_lp_pre_audio_and_select()
+  if not ok then
+    return false, err
+  end
+
+  show("[LOOPER] pre_fx deleted copied LP_PRE track count=" .. tostring(deletedTracks))
+  show("[LOOPER] pre_fx cleared original LP_PRE audio")
+
+  return true
+end
+
+local function delete_latest_loop_record()
+  local currentTrackName, currentLooperType = get_record_track_name()
+
+  debug_dump_loop_items(currentTrackName)
+
+  local entry = pop_latest_loop_record()
+  local source = "stack"
+  local trackName = currentTrackName
+  local item = nil
+
+  if entry then
+    trackName = entry.trackName or currentTrackName
+    item = entry.item
+  end
+
   local tr = find_track_by_name(trackName)
 
   if not tr then
     return false, "missing track: " .. tostring(trackName)
   end
 
-  debug_dump_lp_post_items()
-
-  local item = pop_latest_lp_post_record()
-  local source = "stack"
-
   if not item or not reaper.ValidatePtr2(0, item, "MediaItem*") then
     source = "fallback-latest"
+    trackName = currentTrackName
+    tr = find_track_by_name(trackName)
     item = get_latest_item_on_track(tr)
   end
 
@@ -393,14 +592,15 @@ local function delete_latest_take_or_item_on_track(trackName)
   end
 
   show("[LOOPER UNDO DELETE]")
-  show("track=" .. tostring(trackName))
+  show("currentLooperType=" .. tostring(currentLooperType))
+  show("deleteTrack=" .. tostring(trackName))
   show("source=" .. tostring(source))
   show(get_item_debug_string(item))
 
   reaper.DeleteTrackMediaItem(tr, item)
   reaper.UpdateArrange()
 
-  show("[LOOPER] deleted LP_POST item via " .. tostring(source))
+  show("[LOOPER] deleted loop item from " .. tostring(trackName) .. " via " .. tostring(source))
 
   return true, "item"
 end
@@ -410,15 +610,18 @@ local function clear_loop_time_selection()
   show("[LOOPER] loop/time selection cleared")
 end
 
-local function set_time_selection_from_project_start_to_lp_post_item_end()
-  local lpPost = find_track_by_name("LP_POST")
-  if not lpPost then
-    return false, "missing LP_POST track"
+local function set_time_selection_from_project_start_to_latest_loop_item_end()
+  local trackName, looperType = get_record_track_name()
+  local tr = find_track_by_name(trackName)
+
+  if not tr then
+    return false, "missing " .. tostring(trackName) .. " track"
   end
 
-  local item = get_latest_item_on_track(lpPost)
+  local item = get_latest_item_on_track(tr)
+
   if not item then
-    return false, "no recorded item found on LP_POST"
+    return false, "no recorded item found on " .. tostring(trackName)
   end
 
   local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
@@ -428,6 +631,8 @@ local function set_time_selection_from_project_start_to_lp_post_item_end()
   reaper.GetSet_LoopTimeRange(true, false, 0, itemEnd, false)
   goto_project_start()
 
+  show("[LOOPER] looperType=" .. tostring(looperType))
+  show("[LOOPER] recordTrack=" .. tostring(trackName))
   show("[LOOPER] recorded item start=" .. tostring(pos))
   show("[LOOPER] recorded item end=" .. tostring(itemEnd))
   show("[LOOPER] time selection set: 0 -> " .. tostring(itemEnd))
@@ -443,8 +648,12 @@ local function get_record_count(payload)
   return loopRecordCount
 end
 
-local function undo_latest_lp_post_recording(payload, shouldStopPlayback)
+local function undo_latest_loop_recording(payload, shouldStopPlayback)
   payload = payload or {}
+
+  local trackName, looperType = get_record_track_name()
+
+  unarm_preroll()
 
   if shouldStopPlayback then
     stop_transport_and_return_to_start()
@@ -457,37 +666,99 @@ local function undo_latest_lp_post_recording(payload, shouldStopPlayback)
 
   show("[LOOPER] undo payload recordCount=" .. tostring(payload.recordCount))
   show("[LOOPER] undo resolved recCount=" .. tostring(recCount))
+  show("[LOOPER] undo looperType=" .. tostring(looperType))
+  show("[LOOPER] undo activeRecordTrack=" .. tostring(trackName))
 
-  local okDelete, deletedOrErr = delete_latest_take_or_item_on_track("LP_POST")
+  local okDelete, deletedOrErr = delete_latest_loop_record()
 
   if not okDelete and not shouldStopPlayback then
     show("[LOOPER] delete while playing failed, stopping transport and retrying")
 
     stop_transport_and_return_to_start()
 
-    okDelete, deletedOrErr = delete_latest_take_or_item_on_track("LP_POST")
+    okDelete, deletedOrErr = delete_latest_loop_record()
   end
 
   if not okDelete then
-    return false, tostring(deletedOrErr or "failed to delete latest LP_POST recording")
+    return false, tostring(deletedOrErr or "failed to delete latest loop recording")
   end
 
   loopRecordCount = math.max(0, recCount - 1)
 
-  local lpPost = find_track_by_name("LP_POST")
-  local remaining = count_items_on_track(lpPost)
+  local tr = find_track_by_name(trackName)
+  local remaining = count_items_on_track(tr)
 
   if remaining <= 0 then
     loopRecordCount = 0
-    lpPostRecordStack = {}
+    loopRecordStack = {}
     clear_loop_time_selection()
     goto_project_start()
-    show("[LOOPER] no loop items remain; loop state reset")
+    show("[LOOPER] no loop items remain on " .. tostring(trackName) .. "; loop state reset")
   end
 
-  show("[LOOPER] undo deleted latest LP_POST " .. tostring(deletedOrErr))
+  show("[LOOPER] undo deleted latest " .. tostring(trackName) .. " " .. tostring(deletedOrErr))
   show("[LOOPER] loopRecordCount=" .. tostring(loopRecordCount))
-  show("[LOOPER] stackSize=" .. tostring(#lpPostRecordStack))
+  show("[LOOPER] stackSize=" .. tostring(#loopRecordStack))
+
+  return true
+end
+
+----------------------------------------------------------------------
+-- CLEAR HELPERS
+----------------------------------------------------------------------
+
+local function clear_loop_audio_for_type(looperType)
+  looperType = normalize_looper_type(looperType)
+
+  if looperType == "pre_fx" then
+    return clear_pre_fx_loop_audio()
+  end
+
+  if looperType == "post_fx" then
+    return delete_all_items_on_track("LP_POST")
+  end
+
+  return false, "unknown looper type: " .. tostring(looperType)
+end
+
+----------------------------------------------------------------------
+-- INITIAL BOOT CACHE
+----------------------------------------------------------------------
+
+cache_original_lp_pre_guid()
+
+----------------------------------------------------------------------
+-- START RECORD
+----------------------------------------------------------------------
+
+local function start_record_now(payload)
+  payload = payload or {}
+
+  local recCount = get_record_count(payload)
+  local trackName, looperType = get_record_track_name()
+
+  show("[LOOPER] start recording")
+  show("[LOOPER] looperType=" .. tostring(looperType))
+  show("[LOOPER] recordTrack=" .. tostring(trackName))
+  show("[LOOPER] recCount=" .. tostring(recCount))
+  show("[LOOPER] loopRecordCount before start=" .. tostring(loopRecordCount))
+
+  local okPreroll, prerollErr = arm_preroll_if_needed()
+  if not okPreroll then
+    show("[LOOPER PREROLL] WARN " .. tostring(prerollErr or "failed to arm pre-roll"))
+  end
+
+  if recCount == 0 then
+    ensure_repeat_enabled()
+    goto_project_start()
+  end
+
+  start_recording()
+
+  loopRecordCount = recCount + 1
+
+  show("[LOOPER] recording started")
+  show("[LOOPER] loopRecordCount after start=" .. tostring(loopRecordCount))
 
   return true
 end
@@ -498,54 +769,101 @@ end
 
 function M.start_record(payload)
   dump_command("startLooperRecord", payload)
-
-  local okRoute, routeErr = route_active_bus_to_lp_post()
-  if not okRoute then
-    return false, tostring(routeErr or "failed to route active bus to LP_POST")
-  end
-
-  ensure_repeat_enabled()
-
-  show("[LOOPER] start recording on LP_POST")
-  start_recording()
-
-  return true
+  return start_record_now(payload)
 end
 
 function M.stop_record(payload)
   dump_command("stopLooperRecord", payload)
 
+  unarm_preroll()
+
   local recCount = get_record_count(payload)
+  local trackName, looperType = get_record_track_name()
 
-  show("[LOOPER] stop recording on LP_POST")
+  show("[LOOPER] stop recording")
+  show("[LOOPER] looperType=" .. tostring(looperType))
+  show("[LOOPER] recordTrack=" .. tostring(trackName))
   show("[LOOPER] recCount=" .. tostring(recCount))
+  show("[LOOPER] loopRecordCount at stop=" .. tostring(loopRecordCount))
 
-  stop_recording_continue_playback()
-  push_latest_lp_post_record()
+  if looperType == "pre_fx" then
+    local actionId
+    local effectiveRecCount = tonumber(payload and payload.recordCount) or loopRecordCount
 
-  if recCount == 0 then
-    local okRange, rangeErr = set_time_selection_from_project_start_to_lp_post_item_end()
-    if not okRange then
-      return false, tostring(rangeErr or "failed to set loop range")
+    show("[LOOPER] pre_fx payload.recordCount=" .. tostring(payload and payload.recordCount))
+    show("[LOOPER] pre_fx loopRecordCount=" .. tostring(loopRecordCount))
+    show("[LOOPER] pre_fx effectiveRecCount=" .. tostring(effectiveRecCount))
+
+    if effectiveRecCount <= 1 then
+      actionId = "_4e9c4e29f54f461e914debb2fd456355"
+      show("[LOOPER] pre_fx first loop stop")
+    else
+      actionId = "_089a392ff23d45c1a5f8bf46f9a8dc8c"
+      show("[LOOPER] pre_fx overdub stop")
     end
 
-    ensure_repeat_enabled()
-    start_playing()
+    show("[LOOPER] customActionId=" .. tostring(actionId))
 
-    show("[LOOPER] first loop captured; playback continuing from project start")
-  else
-    show("[LOOPER] overdub stopped; playback continuing")
+    local cmdId = reaper.NamedCommandLookup(actionId)
+    if not cmdId or cmdId == 0 then
+      return false, "custom action not found: " .. tostring(actionId)
+    end
+
+    reaper.Main_OnCommand(cmdId, 0)
+
+    loopRecordCount = effectiveRecCount
+
+    show("[LOOPER] loopRecordCount=" .. tostring(loopRecordCount))
+
+    return true
   end
 
-  loopRecordCount = recCount + 1
-  show("[LOOPER] loopRecordCount=" .. tostring(loopRecordCount))
+  if looperType == "post_fx" then
+    local effectiveRecCount = tonumber(payload and payload.recordCount) or loopRecordCount
 
-  return true
+    show("[LOOPER] post_fx payload.recordCount=" .. tostring(payload and payload.recordCount))
+    show("[LOOPER] post_fx loopRecordCount=" .. tostring(loopRecordCount))
+    show("[LOOPER] post_fx effectiveRecCount=" .. tostring(effectiveRecCount))
+
+    stop_recording_continue_playback()
+
+    local okPush = push_latest_loop_record()
+    if not okPush then
+      return false, "no recorded item found on " .. tostring(trackName)
+    end
+
+    if effectiveRecCount <= 1 then
+      local okRange, rangeErr = set_time_selection_from_project_start_to_latest_loop_item_end()
+      if not okRange then
+        return false, tostring(rangeErr or "failed to set loop range")
+      end
+
+      ensure_repeat_enabled()
+      goto_project_start()
+      start_playing()
+
+      show("[LOOPER] post_fx first loop captured; playback started from project start")
+    else
+      goto_project_start()
+      start_playing()
+
+      show("[LOOPER] post_fx overdub stopped; playback restarted from project start")
+    end
+
+    loopRecordCount = effectiveRecCount
+
+    show("[LOOPER] loopRecordCount=" .. tostring(loopRecordCount))
+
+    return true
+  end
+
+  return false, "unknown looper type: " .. tostring(looperType)
 end
 
 function M.start_playback(payload)
   dump_command("startLooperPlayback", payload)
 
+  unarm_preroll()
   ensure_repeat_enabled()
   goto_project_start()
   start_playing()
@@ -558,6 +876,7 @@ end
 function M.stop_playback(payload)
   dump_command("stopLooperPlayback", payload)
 
+  unarm_preroll()
   stop_transport_and_return_to_start()
 
   show("[LOOPER] stop playback")
@@ -567,35 +886,89 @@ end
 
 function M.undo_overdub(payload)
   dump_command("undoLooperOverdub", payload)
+
+  local trackName, looperType = get_record_track_name()
+
   show("[LOOPER] undo overdub")
-  return undo_latest_lp_post_recording(payload, false)
+  show("[LOOPER] looperType=" .. tostring(looperType))
+  show("[LOOPER] recordTrack=" .. tostring(trackName))
+
+  if looperType == "pre_fx" then
+    return undo_pre_fx_latest_overdub()
+  end
+
+  return undo_latest_loop_recording(payload, false)
 end
 
 function M.undo_record(payload)
   dump_command("undoLooperRecord", payload)
+
+  local trackName, looperType = get_record_track_name()
+
   show("[LOOPER] undo record")
-  return undo_latest_lp_post_recording(payload, true)
+  show("[LOOPER] looperType=" .. tostring(looperType))
+  show("[LOOPER] recordTrack=" .. tostring(trackName))
+
+  if looperType == "pre_fx" then
+    stop_transport_and_return_to_start()
+    return undo_pre_fx_latest_overdub()
+  end
+
+  return undo_latest_loop_recording(payload, true)
 end
 
 function M.clear(payload)
   dump_command("clearLooper", payload)
-  show("[LOOPER] clear")
 
-  local okDelete, deleteErr = delete_all_items_on_track("LP_POST")
-  if not okDelete then
-    return false, tostring(deleteErr or "failed to delete LP_POST audio")
+  payload = payload or {}
+
+  unarm_preroll()
+
+  local payloadLooperType = normalize_looper_type(payload.looperType)
+  local looperType = payloadLooperType or read_looper_type()
+  local trackName = get_track_name_for_looper_type(looperType)
+
+  show("[LOOPER] delete loop audio")
+  show("[LOOPER] looperType=" .. tostring(looperType))
+  show("[LOOPER] activeRecordTrack=" .. tostring(trackName))
+  show("[LOOPER] clear reason=" .. tostring(payload.reason))
+
+  stop_transport_and_return_to_start()
+
+  if looperType == "post_fx" then
+    local okPost, postErr = delete_all_items_on_track("LP_POST")
+    if not okPost then
+      return false, tostring(postErr or "failed to clear LP_POST audio")
+    end
+
+    show("[LOOPER] post_fx cleared all LP_POST audio")
+
+  elseif looperType == "pre_fx" then
+    local okPre, preErr = clear_pre_fx_loop_audio()
+    if not okPre then
+      return false, tostring(preErr or "failed to clear LP_PRE audio")
+    end
+
+    show("[LOOPER] pre_fx cleared copied LP_PRE tracks and original LP_PRE audio")
+
+  else
+    return false, "unknown looper type: " .. tostring(looperType)
   end
 
   loopRecordCount = 0
-  lpPostRecordStack = {}
-
-  show("[LOOPER] record count reset to 0")
-  show("[LOOPER] stack reset")
+  loopRecordStack = {}
+  loopLengthBars = nil
 
   clear_loop_time_selection()
   goto_project_start()
+  reaper.UpdateArrange()
 
-  show("[LOOPER] loop audio cleared")
+  show("[LOOPER] record count reset to 0")
+  show("[LOOPER] stack reset")
+  show("[LOOPER] loopLengthBars reset")
+  show("[LOOPER] time selection cleared")
+  show("[LOOPER] playhead moved to project start")
+  show("[LOOPER] delete loop audio complete")
 
   return true
 end
@@ -603,17 +976,172 @@ end
 function M.toggle_type(payload)
   dump_command("toggleLooperType", payload)
 
-  local looperTypeRaw = tostring(payload and payload.looperType or "")
-  local looperType = looperTypeRaw:gsub("%-", "_")
+  payload = payload or {}
+
+  unarm_preroll()
+
+  local requestedType = normalize_looper_type(payload.looperType)
+  local stateType = read_looper_type()
+
+  show("[LOOPER] toggle type")
+  show("[LOOPER] requestedType=" .. tostring(requestedType))
+  show("[LOOPER] stateType=" .. tostring(stateType))
+  show("[LOOPER] loopRecordCount before toggle=" .. tostring(loopRecordCount))
+
+  local typeToClear = nil
+
+  if requestedType == "pre_fx" then
+    typeToClear = "post_fx"
+  elseif requestedType == "post_fx" then
+    typeToClear = "pre_fx"
+  else
+    typeToClear = stateType
+  end
+
+  show("[LOOPER] clearing loop audio for previous type=" .. tostring(typeToClear))
+
+  local okClear, clearErr = M.clear({
+    looperType = typeToClear,
+    reason = "toggleLooperType",
+  })
+
+  if not okClear then
+    return false, tostring(clearErr or "failed to clear loop audio before type switch")
+  end
 
   loopRecordCount = 0
-  lpPostRecordStack = {}
+  loopRecordStack = {}
 
-  show("[LOOPER] looper type changed to " .. tostring(looperType))
+  if requestedType == "pre_fx" then
+    cache_original_lp_pre_guid()
+  end
+
+  stop_transport_and_return_to_start()
+
+  if requestedType == "post_fx" then
+    local lpPostTrack = find_track_by_name("LP_POST")
+
+    if lpPostTrack then
+      select_track(lpPostTrack)
+      show("[LOOPER] selected LP_POST")
+    else
+      show("[LOOPER] WARN LP_POST track not found")
+    end
+
+  elseif requestedType == "pre_fx" then
+    local lpPreTrack = find_track_by_name("LP_PRE")
+
+    if lpPreTrack then
+      select_track(lpPreTrack)
+      show("[LOOPER] selected LP_PRE")
+    else
+      show("[LOOPER] WARN LP_PRE track not found")
+    end
+  end
+
+  show("[LOOPER] looper type changed to " .. tostring(requestedType or stateType))
   show("[LOOPER] record count reset to 0")
   show("[LOOPER] stack reset")
+  show("[LOOPER] playback stopped")
+  show("[LOOPER] playhead moved to project start")
 
   return true
+end
+
+
+----------------------------------------------------------------------
+-- LOOP LENGTH
+----------------------------------------------------------------------
+
+local function set_time_selection_from_project_start_to_measure_count(measureCount)
+  measureCount = tonumber(measureCount)
+
+  if not measureCount then
+    return false, "invalid measure count"
+  end
+
+  measureCount = math.floor(measureCount + 0.5)
+
+  if measureCount < 1 then
+    return false, "measure count must be >= 1"
+  end
+
+  local startTime = reaper.TimeMap2_beatsToTime(0, 0)
+  local endTime = reaper.TimeMap2_beatsToTime(0, 0, measureCount)
+
+  reaper.GetSet_LoopTimeRange(true, false, startTime, endTime, false)
+  goto_project_start()
+
+  show("[LOOPER LENGTH]")
+  show("measureCount=" .. tostring(measureCount))
+  show("startTime=" .. tostring(startTime))
+  show("endTime=" .. tostring(endTime))
+  show("time selection set: " .. tostring(startTime) .. " -> " .. tostring(endTime))
+
+  return true
+end
+
+function M.set_loop_length_enabled(payload)
+  dump_command("setLoopLengthEnabled", payload)
+
+  payload = payload or {}
+
+  local enabled = payload.enabled == true
+
+  local ok, payloadJson = pcall(json.encode, payload)
+  if not ok then
+    payloadJson = "<encode failed>"
+  end
+
+  show("[LOOPER LENGTH ENABLED]")
+  show("payload=" .. tostring(payloadJson))
+  show("enabled=" .. tostring(enabled))
+  show("loopLengthBars=" .. tostring(loopLengthBars))
+
+  return true, nil, {
+    loopLengthEnabled = enabled,
+    loopLengthBars = loopLengthBars,
+  }
+end
+
+function M.set_loop_length(payload)
+  dump_command("setLoopLength", payload)
+
+  payload = payload or {}
+
+  local bars = tonumber(payload.bars or payload.lengthBars or payload.loopLengthBars)
+
+  if not bars then
+    return false, "invalid loop length bars"
+  end
+
+  bars = math.floor(bars + 0.5)
+
+  if bars < 1 then
+    return false, "loop length bars must be >= 1"
+  end
+
+  loopLengthBars = bars
+
+  local okRange, rangeErr =
+    set_time_selection_from_project_start_to_measure_count(loopLengthBars)
+
+  if not okRange then
+    return false, tostring(rangeErr or "failed to set loop length time selection")
+  end
+
+  local ok, payloadJson = pcall(json.encode, payload)
+  if not ok then
+    payloadJson = "<encode failed>"
+  end
+
+  show("[LOOPER LENGTH]")
+  show("payload=" .. tostring(payloadJson))
+  show("loopLengthBars=" .. tostring(loopLengthBars))
+
+  return true, nil, {
+    loopLengthBars = loopLengthBars,
+  }
 end
 
 return M

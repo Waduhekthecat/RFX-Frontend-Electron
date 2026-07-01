@@ -39,11 +39,19 @@ export const DEFAULT_LOOPER_STATE = Object.freeze({
   status: "idle",
   lengthMs: 0,
   recordCount: 0,
+  loopLengthEnabled: false,
+  loopLength: 4,
 });
 
 export const DEFAULT_SESSION_TEMPO_BPM = 120;
 export const DEFAULT_SESSION_CLICK_ENABLED = false;
 export const DEFAULT_SESSION_COUNT_IN_ENABLED = false;
+export const DEFAULT_SESSION_BEATS_PER_MEASURE = 4;
+export const DEFAULT_SESSION_NOTE_LENGTH = 4;
+
+const LOOP_LENGTHS = new Set([2, 4, 8, 16, 32]);
+const BEATS_PER_MEASURE_VALUES = new Set([2, 3, 4, 6, 7, 8, 16]);
+const NOTE_LENGTH_VALUES = new Set([2, 4, 8, 16]);
 
 function asLooperTypeValue(value, fallback = DEFAULT_LOOPER_TYPE) {
   const raw = asStr(value, "").toLowerCase();
@@ -67,6 +75,13 @@ function makeLooperState(value, fallback = DEFAULT_LOOPER_STATE) {
     status: asLooperStatus(source.status, fallback.status),
     lengthMs: Math.max(0, asNum(source.lengthMs, fallback.lengthMs)),
     recordCount: Math.max(0, Math.floor(asNum(source.recordCount, fallback.recordCount))),
+    loopLengthEnabled:
+      source.loopLengthEnabled == null
+        ? fallback.loopLengthEnabled
+        : !!source.loopLengthEnabled,
+    loopLength: LOOP_LENGTHS.has(Number(source.loopLength))
+      ? Number(source.loopLength)
+      : fallback.loopLength,
   };
 }
 
@@ -82,6 +97,13 @@ function makeLooperPatch(patch, fallback = DEFAULT_LOOPER_STATE) {
   }
   if (Object.prototype.hasOwnProperty.call(p, "recordCount")) {
     next.recordCount = Math.max(0, Math.floor(asNum(p.recordCount, fallback.recordCount)));
+  }
+  if (Object.prototype.hasOwnProperty.call(p, "loopLengthEnabled")) {
+    next.loopLengthEnabled = !!p.loopLengthEnabled;
+  }
+  if (Object.prototype.hasOwnProperty.call(p, "loopLength")) {
+    const loopLength = Number(p.loopLength);
+    if (LOOP_LENGTHS.has(loopLength)) next.loopLength = loopLength;
   }
 
   return next;
@@ -475,6 +497,8 @@ export const useRfxStore = create((set, get) => ({
     tempoBpm: DEFAULT_SESSION_TEMPO_BPM,
     clickEnabled: DEFAULT_SESSION_CLICK_ENABLED,
     countInEnabled: DEFAULT_SESSION_COUNT_IN_ENABLED,
+    beatsPerMeasure: DEFAULT_SESSION_BEATS_PER_MEASURE,
+    noteLength: DEFAULT_SESSION_NOTE_LENGTH,
   },
 
   ops: {
@@ -652,6 +676,8 @@ export const useRfxStore = create((set, get) => ({
         tempoBpm: DEFAULT_SESSION_TEMPO_BPM,
         clickEnabled: DEFAULT_SESSION_CLICK_ENABLED,
         countInEnabled: DEFAULT_SESSION_COUNT_IN_ENABLED,
+        beatsPerMeasure: DEFAULT_SESSION_BEATS_PER_MEASURE,
+        noteLength: DEFAULT_SESSION_NOTE_LENGTH,
       },
     }));
   },
@@ -711,6 +737,46 @@ export const useRfxStore = create((set, get) => ({
     }));
     get().logEvent("looper:count_in_updated", {
       countInEnabled: nextEnabled,
+    });
+  },
+
+  setLoopLengthEnabled: (enabled) => {
+    const nextEnabled = !!enabled;
+    get().updateLooper({ loopLengthEnabled: nextEnabled });
+    get().logEvent("looper:length_enabled_updated", {
+      loopLengthEnabled: nextEnabled,
+    });
+  },
+
+  setLoopLength: (loopLength) => {
+    const nextLoopLength = Number(loopLength);
+    if (!LOOP_LENGTHS.has(nextLoopLength)) return;
+    get().updateLooper({ loopLength: nextLoopLength });
+    get().logEvent("looper:length_updated", {
+      loopLength: nextLoopLength,
+    });
+  },
+
+  setTimeSignature: (beatsPerMeasure, noteLength) => {
+    const nextBeatsPerMeasure = Number(beatsPerMeasure);
+    const nextNoteLength = Number(noteLength);
+    if (
+      !BEATS_PER_MEASURE_VALUES.has(nextBeatsPerMeasure) ||
+      !NOTE_LENGTH_VALUES.has(nextNoteLength)
+    ) {
+      return;
+    }
+
+    set((s) => ({
+      session: {
+        ...s.session,
+        beatsPerMeasure: nextBeatsPerMeasure,
+        noteLength: nextNoteLength,
+      },
+    }));
+    get().logEvent("session:time_signature_updated", {
+      beatsPerMeasure: nextBeatsPerMeasure,
+      noteLength: nextNoteLength,
     });
   },
 
@@ -940,6 +1006,14 @@ export const useRfxStore = create((set, get) => ({
             norm.session?.countInEnabled ??
             s.session.countInEnabled ??
             DEFAULT_SESSION_COUNT_IN_ENABLED,
+          beatsPerMeasure:
+            norm.session?.beatsPerMeasure ??
+            s.session.beatsPerMeasure ??
+            DEFAULT_SESSION_BEATS_PER_MEASURE,
+          noteLength:
+            norm.session?.noteLength ??
+            s.session.noteLength ??
+            DEFAULT_SESSION_NOTE_LENGTH,
         },
 
         ops: {

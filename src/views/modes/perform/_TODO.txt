@@ -1,0 +1,27 @@
+Edit lane selection flicker from Perform Add buttons
+
+Symptom:
+- From Perform, clicking an Add FX card on a specific active lane correctly navigates to Edit,
+  but Edit can briefly render its previous/default lane first.
+- Example: clicking Add on FX_2C may briefly show FX_1A or another previously selected lane
+  before settling.
+
+Likely cause:
+- The requested Edit lane is currently passed through route state and applied in EditView.
+- Route state is too late/transient for this interaction because mode navigation and view-model
+  confirmation can render Edit before the lane selection has fully settled.
+
+Recommended fix:
+- Promote selected Edit lane to shared/session state instead of route-local state.
+- When a Perform track-card Add button is clicked, set the desired Edit target synchronously:
+  - active edit bus id
+  - active edit lane
+  - optionally active edit track guid
+- Then switch to Edit mode / navigate to Edit.
+- EditView should derive its initial selected lane directly from that shared/session state so the
+  first render already points at the intended lane.
+
+Notes:
+- Keep the existing route-state fallback only as a convenience/deep-link path, not the primary
+  Perform-to-Edit handoff.
+- This should also make MIDI or future non-route mode switches more deterministic.

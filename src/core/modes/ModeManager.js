@@ -41,11 +41,6 @@ export class ModeManager {
       if (dispatchIfUnchanged) {
         const intentName = MODE_INTENT_BY_MODE[nextMode];
         if (intentName && this.dispatchIntent) {
-          console.log("[MODE → RFX INTENT]", {
-            source,
-            mode: nextMode,
-            name: intentName,
-          });
           void this.dispatchIntent({ name: intentName });
         }
       }
@@ -61,12 +56,6 @@ export class ModeManager {
         mode: nextMode,
         afterSeq: this.lastViewModelSeq,
       };
-      console.log("[MODE → RFX INTENT]", {
-        source,
-        previousMode,
-        mode: nextMode,
-        name: intentName,
-      });
       void this.dispatchIntent({ name: intentName });
     }
 
@@ -117,12 +106,12 @@ export class ModeManager {
     this.pendingMode = null;
     this.currentMode = resolvedMode;
 
-    console.log("[MODE ← RFX VM]", {
-      requestedMode,
-      resolvedMode,
-      verified,
-      seq: viewModelSeq,
-    });
+    // console.log("[MODE ← RFX VM]", {
+    //   requestedMode,
+    //   resolvedMode,
+    //   verified,
+    //   seq: viewModelSeq,
+    // });
 
     if (previousMode !== resolvedMode || requestedMode !== null) {
       this.notify({

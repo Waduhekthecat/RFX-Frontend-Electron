@@ -51,7 +51,6 @@ function safeSend(channel, payload) {
 function setBootState(nextState) {
   if (!nextState || bootState === nextState) return;
   bootState = nextState;
-  console.log("[RFX] bootState =", bootState);
   safeSend("rfx:bootState", bootState);
 }
 
@@ -59,7 +58,6 @@ function setReaperReady(nextReady) {
   const value = !!nextReady;
   if (reaperReady === value) return;
   reaperReady = value;
-  console.log("[RFX] reaperReady =", reaperReady);
   safeSend("rfx:reaperReady", reaperReady);
 
   if (reaperReady) {
@@ -148,11 +146,9 @@ function evaluateReaperReadiness(vm, source = "unknown") {
   if (!hasUsableVmIdentity(vm)) return;
 
   if (!isFreshVmFile()) {
-    console.log(`[RFX] ignoring stale VM from ${source}`);
     return;
   }
 
-  console.log(`[RFX] fresh VM accepted from ${source}`);
   setReaperReady(true);
 }
 
@@ -175,7 +171,6 @@ async function clearRuntimeIpcArtifacts() {
   ]);
 
   liveVm = createFallbackVm();
-  console.log("[RFX] cleared stale runtime IPC artifacts");
 }
 
 function scheduleLooperInputGainWrite() {
@@ -242,7 +237,6 @@ function launchReaper() {
   const { exePath, args } = buildReaperLaunchConfig();
 
   try {
-    console.log("[RFX] launching REAPER:", exePath, args);
     reaperProcess = spawn(exePath, args, {
       detached: true,
       stdio: "ignore",
@@ -285,16 +279,6 @@ function createWindow() {
 
   const windowX = x + Math.floor((displayWidth - width) / 2);
   const windowY = y + Math.floor((displayHeight - height) / 2);
-
-  console.log("PRELOAD PATH =", preloadPath);
-  console.log("[RFX] target display =", {
-    id: targetDisplay.id,
-    label: targetDisplay.label,
-    bounds: targetDisplay.bounds,
-    scaleFactor: targetDisplay.scaleFactor,
-    rotation: targetDisplay.rotation,
-    touchSupport: targetDisplay.touchSupport,
-  });
 
   mainWindow = new BrowserWindow({
     x: windowX,
@@ -372,7 +356,6 @@ async function bootIpc() {
 
   watchers = createIpcWatchers({
     onVm(nextVm) {
-      console.log("[RFX] onVm received");
       liveVm = nextVm;
       safeSend("rfx:vm", nextVm);
       evaluateReaperReadiness(nextVm, "watcher");

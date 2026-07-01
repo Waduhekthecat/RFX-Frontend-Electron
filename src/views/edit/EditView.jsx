@@ -385,6 +385,11 @@ export function EditView() {
   const inPluginSubView = location.pathname.startsWith("/edit/plugin/");
   if (inPluginSubView) return <Outlet />;
 
+  return <EditMainView location={location} />;
+}
+
+function EditMainView({ location }) {
+  const navigate = useNavigate();
   const vm = useTransportVM();
   const intent = useIntent();
 
@@ -397,16 +402,29 @@ export function EditView() {
 
   const mode = normalizeMode((vm?.busModes && vm.busModes[bus.id]) || "linear");
 
+  const requestedBusId = String(location.state?.busId || "");
+  const requestedLane = String(location.state?.lane || "").toUpperCase();
+  const validRequestedLane =
+    requestedBusId === bus.id && availableLanes(mode).includes(requestedLane);
+
   const [laneByBus, setLaneByBus] = React.useState({});
-  const lane = nextValidLane(mode, laneByBus[bus.id]);
+  const lane = validRequestedLane
+    ? requestedLane
+    : nextValidLane(mode, laneByBus[bus.id]);
 
   React.useEffect(() => {
     setLaneByBus((prev) => {
       const next = { ...prev };
-      next[bus.id] = nextValidLane(mode, next[bus.id]);
+      next[bus.id] = validRequestedLane
+        ? requestedLane
+        : nextValidLane(mode, next[bus.id]);
       return next;
     });
-  }, [bus.id, mode]);
+
+    if (validRequestedLane) {
+      navigate(location.pathname, { replace: true, state: null });
+    }
+  }, [bus.id, location.pathname, mode, navigate, requestedLane, validRequestedLane]);
 
   function setLane(L) {
     setLaneByBus((prev) => ({ ...prev, [bus.id]: L }));

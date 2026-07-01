@@ -1,7 +1,5 @@
 import React from "react";
 import { NavLink } from "react-router-dom";
-import { useTransportVM } from "../../core/useTransportVM";
-import { normalizeMode } from "../../core/DomainHelpers";
 import { styles, cx } from "./_styles";
 import { modeManager } from "../../core/modes/ModeManager";
 import { RFX_MODES } from "../../core/modes/Modes";
@@ -15,27 +13,6 @@ const BASE_TABS = [
   { label: "Routing", to: "/routing" },
   { label: "System", to: "/system" },
 ];
-
-function ModeBadge({ mode }) {
-  const m = normalizeMode(mode);
-  const label = m === "linear" ? "LINEAR" : m === "parallel" ? "PAR" : "LCR";
-
-  const tone =
-    m === "lcr"
-      ? "bg-blue-400/15 text-blue-200 border-blue-400/25"
-      : m === "parallel"
-        ? "bg-yellow-400/15 text-yellow-200 border-yellow-400/25"
-        : "bg-white/10 text-white/75 border-white/15";
-
-  return (
-    <span
-      className={cx(styles.badgeBase, tone)}
-      title={`Routing mode: ${label}`}
-    >
-      {label}
-    </span>
-  );
-}
 
 function StatusDot({ label, active }) {
   return (
@@ -52,8 +29,6 @@ function StatusDot({ label, active }) {
 }
 
 export function Nav() {
-  const vm = useTransportVM();
-
   const tabs = React.useMemo(() => {
     const devTab = import.meta.env.DEV
       ? [{ label: "Core", to: "/dev/core" }]
@@ -68,9 +43,6 @@ export function Nav() {
     });
   }, []);
 
-  const activeBusId = vm.activeBusId || "FX_1";
-  const mode = normalizeMode(vm.busModes?.[activeBusId] || "linear");
-
   return (
     <div className={styles.wrap}>
       {/* LEFT */}
@@ -78,13 +50,6 @@ export function Nav() {
         <div className={styles.brand}>RFX</div>
         <div className={styles.env}>Beta</div>
 
-        <div className={styles.divider} />
-
-        <div className={styles.activeRow}>
-          <span className={styles.activeLabel}>Active</span>
-          <span className={styles.activeBus}>{activeBusId}</span>
-          <ModeBadge mode={mode} />
-        </div>
       </div>
 
       {/* CENTER */}

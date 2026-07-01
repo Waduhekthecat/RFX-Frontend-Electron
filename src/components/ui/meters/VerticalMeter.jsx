@@ -13,7 +13,10 @@ export function VerticalMeter({
 }) {
   // Keep the latest target in a ref so the RAF loop always reads fresh input
   const targetRef = React.useRef(0);
-  targetRef.current = clamp01(value);
+
+  React.useEffect(() => {
+    targetRef.current = clamp01(value);
+  }, [value]);
 
   const [level, setLevel] = React.useState(0);
   const [peak, setPeak] = React.useState(0);
@@ -93,18 +96,23 @@ export function VerticalMeter({
     }
 
     refs.current.lastT = 0;
-    refs.current.raf = requestAnimationFrame(tick);
+    const r = refs.current;
+    r.raf = requestAnimationFrame(tick);
 
     return () => {
       alive = false;
-      cancelAnimationFrame(refs.current.raf);
-      refs.current.raf = 0;
+      cancelAnimationFrame(r.raf);
+      r.raf = 0;
     };
   }, [enabled]);
 
   const theme = themeForLevel(peak);
-  const fillPct = clamp01(level) * 100;
   const peakPct = clamp01(peak) * 100;
+  const segmentCount = 30;
+  const segments = React.useMemo(
+    () => Array.from({ length: segmentCount }, (_, i) => (i + 1) / segmentCount),
+    []
+  );
 
   return (
     <div
@@ -115,54 +123,55 @@ export function VerticalMeter({
       style={{
         width,
         borderRadius: rounded,
-        background: "rgba(255,255,255,0.06)",
       }}
     >
-      {/* Glow overlay (purely visual) */}
+      <div className={styles.inner} />
+
       {enabled && (
         <div
           className={styles.glow}
           style={{
             borderRadius: rounded,
-            boxShadow: `0 0 12px ${theme.glow}`,
+            boxShadow: `0 0 14px ${theme.glow}`,
           }}
         />
       )}
 
-      {/* fill */}
-      <div
-        className={styles.fill}
-        style={{
-          height: `${fillPct}%`,
-          background: theme.fill,
-          borderRadius: rounded,
-          filter: enabled ? "saturate(1.05)" : "saturate(0.8)",
-        }}
-      />
+      <div className={styles.segmentStack}>
+        {segments.map((threshold) => {
+          const active = enabled && threshold <= level;
+          const zone =
+            threshold >= 0.92
+              ? styles.segmentRed
+              : threshold >= 0.76
+                ? styles.segmentYellow
+                : styles.segmentGreen;
 
-      {/* cap highlight */}
-      <div
-        className={styles.cap}
-        style={{
-          bottom: `calc(${fillPct}% - 2px)`,
-          height: 6,
-          opacity: enabled ? 1 : 0.6,
-          background: `linear-gradient(180deg, ${theme.cap} 0%, rgba(255,255,255,0) 100%)`,
-        }}
-      />
+          return (
+            <div
+              key={threshold}
+              className={cn(
+                styles.segment,
+                active ? zone : styles.segmentIdle
+              )}
+            />
+          );
+        })}
+      </div>
 
-      {/* peak line */}
+      <div className={styles.gridLines} />
+
       <div
         className={styles.peak}
         style={{
           bottom: `calc(${peakPct}% - 1px)`,
           height: 2,
-          background: theme.peak,
+          background: enabled ? theme.peak : "rgba(255,255,255,0.30)",
           opacity: enabled ? 0.95 : 0.7,
+          boxShadow: enabled ? `0 0 6px ${theme.peak}` : "none",
         }}
       />
 
-      {/* clip light */}
       <div
         className={styles.clip}
         style={{

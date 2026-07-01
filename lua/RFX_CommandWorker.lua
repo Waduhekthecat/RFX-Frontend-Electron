@@ -46,6 +46,16 @@ local function write_json(path, obj)
   return write_file(path, encoded)
 end
 
+local function reaper_log(target, name, _payload)
+  reaper.ShowConsoleMsg(
+    "[REAPER -> " ..
+    tostring(target or "") ..
+    "] " ..
+    tostring(name or "") ..
+    "\n"
+  )
+end
+
 local function read_json(path)
   local raw = read_file(path)
   if not raw or raw == "" then return nil end
@@ -120,6 +130,9 @@ local function write_result(id, name, okFlag, err, extra)
   end
 
   local ok = write_json(get_ipc_dir() .. "/res.json", result)
+  if ok then
+    reaper_log("res", name, result)
+  end
   if not ok then
     log_debug("FAILED to write res.json")
   end
@@ -132,7 +145,11 @@ end
 local function default_state()
   return {
     mode = "perform",
+    looperType = "post_fx",
     activeBusId = "FX_1",
+    tempoBpm = 120,
+    clickEnabled = false,
+    countInEnabled = false,
     busModes = {
       FX_1 = "linear",
       FX_2 = "linear",
@@ -140,6 +157,18 @@ local function default_state()
       FX_4 = "linear",
     },
   }
+end
+
+local function clamp_tempo_bpm(v)
+  local bpm = tonumber(v)
+  if not bpm then return nil end
+
+  bpm = math.floor(bpm + 0.5)
+
+  if bpm < 40 then return 40 end
+  if bpm > 240 then return 240 end
+
+  return bpm
 end
 
 local function normalize_bus_id(v)
@@ -166,6 +195,15 @@ local function normalize_mode(v)
   return nil
 end
 
+local function normalize_looper_type(v)
+  local s = tostring(v or ""):lower()
+  s = s:gsub("%-", "_")
+
+  if s == "pre_fx" then return "pre_fx" end
+  if s == "post_fx" then return "post_fx" end
+
+  return "post_fx"
+end
 
 local function read_state()
   local state, err = read_json(state_path())
@@ -189,18 +227,26 @@ local function read_state()
   if not normalize_bus_id(state.activeBusId) then
     state.activeBusId = "FX_1"
   end
-
+  
   state.mode = normalize_app_mode(state.mode) or "perform"
+  state.looperType = normalize_looper_type(state.looperType)
+  state.tempoBpm = clamp_tempo_bpm(state.tempoBpm) or 120
+  state.clickEnabled = state.clickEnabled == true
+  state.countInEnabled = state.countInEnabled == true
   state.busModes.FX_1 = normalize_mode(state.busModes.FX_1) or "linear"
   state.busModes.FX_2 = normalize_mode(state.busModes.FX_2) or "linear"
   state.busModes.FX_3 = normalize_mode(state.busModes.FX_3) or "linear"
   state.busModes.FX_4 = normalize_mode(state.busModes.FX_4) or "linear"
-
+  
   return state
 end
 
 local function write_state(state)
-  return write_json(state_path(), state)
+  local ok = write_json(state_path(), state)
+  if ok then
+    reaper_log("state", "writeState", state)
+  end
+  return ok
 end
 
 local function apply_routing_from_state(state)
@@ -237,6 +283,37 @@ end
 
 local FX_BUS_IDS = { "FX_1", "FX_2", "FX_3", "FX_4" }
 
+local function get_lane_specs()
+  return {
+    { id = "FX_1A", busId = "FX_1", lane = "A" },
+    { id = "FX_1B", busId = "FX_1", lane = "B" },
+    { id = "FX_1C", busId = "FX_1", lane = "C" },
+
+    { id = "FX_2A", busId = "FX_2", lane = "A" },
+    { id = "FX_2B", busId = "FX_2", lane = "B" },
+    { id = "FX_2C", busId = "FX_2", lane = "C" },
+
+    { id = "FX_3A", busId = "FX_3", lane = "A" },
+    { id = "FX_3B", busId = "FX_3", lane = "B" },
+    { id = "FX_3C", busId = "FX_3", lane = "C" },
+
+    { id = "FX_4A", busId = "FX_4", lane = "A" },
+    { id = "FX_4B", busId = "FX_4", lane = "B" },
+    { id = "FX_4C", busId = "FX_4", lane = "C" },
+    
+    { id = "LP_POST", busId = "", lane = "" },
+    { id = "FX_PRE", busId = "", lane = "" },
+  }
+  
+end
+
+local function lane_enabled_for_mode(lane, mode)
+  if lane == "A" then return true end
+  if lane == "B" then return mode == "parallel" or mode == "lcr" end
+  if lane == "C" then return mode == "lcr" end
+  return false
+end
+
 local function set_master_send(track, enabled)
   if not track then return false end
   reaper.SetMediaTrackInfo_Value(track, "B_MAINSEND", enabled and 1 or 0)
@@ -269,6 +346,7 @@ local function ensure_send_to_track(srcTrack, destTrack)
       reaper.SetTrackSendInfo_Value(srcTrack, 0, sendIndex, "I_SENDMODE", 0)
       reaper.SetTrackSendInfo_Value(srcTrack, 0, sendIndex, "D_VOL", 1.0)
       reaper.SetTrackSendInfo_Value(srcTrack, 0, sendIndex, "D_PAN", 0.0)
+      reaper.SetTrackSendInfo_Value(srcTrack, 0, sendIndex, "B_MUTE", 0)
       return true
     end
   end
@@ -281,6 +359,89 @@ local function ensure_send_to_track(srcTrack, destTrack)
   reaper.SetTrackSendInfo_Value(srcTrack, 0, newSendIndex, "I_SENDMODE", 0)
   reaper.SetTrackSendInfo_Value(srcTrack, 0, newSendIndex, "D_VOL", 1.0)
   reaper.SetTrackSendInfo_Value(srcTrack, 0, newSendIndex, "D_PAN", 0.0)
+  reaper.SetTrackSendInfo_Value(srcTrack, 0, newSendIndex, "B_MUTE", 0)
+
+  return true
+end
+
+local function set_track_selected(track, selected)
+  if not track then return false end
+  reaper.SetTrackSelected(track, selected and true or false)
+  return true
+end
+
+local function set_record_arm_no_input_monitor(track, enabled)
+  if not track then return false end
+
+  reaper.SetMediaTrackInfo_Value(track, "I_RECARM", enabled and 1 or 0)
+  reaper.SetMediaTrackInfo_Value(track, "I_RECMON", enabled and 1 or 0) -- input monitoring on/off
+  reaper.SetMediaTrackInfo_Value(track, "I_RECINPUT", -1) -- no input
+  reaper.SetMediaTrackInfo_Value(track, "I_RECMODE", 2) -- record disabled / monitor only
+
+  return true
+end
+
+local function apply_active_bus_monitoring(previousBusId, nextBusId)
+  previousBusId = normalize_bus_id(previousBusId)
+  nextBusId = normalize_bus_id(nextBusId)
+
+  if previousBusId and previousBusId ~= nextBusId then
+    set_record_arm_no_input_monitor(find_track_by_name(previousBusId), false)
+  end
+
+  if nextBusId then
+    set_record_arm_no_input_monitor(find_track_by_name(nextBusId), true)
+  end
+
+  log_debug(
+    "active bus monitoring previous=" ..
+    tostring(previousBusId) ..
+    " next=" ..
+    tostring(nextBusId)
+  )
+
+  return true
+end
+
+local function set_record_output_stereo(track, armed)
+  if not track then return false end
+
+  reaper.SetMediaTrackInfo_Value(track, "I_RECMODE", 1)
+  reaper.SetMediaTrackInfo_Value(track, "I_RECARM", armed and 1 or 0)
+
+  return true
+end
+
+local function apply_looper_record_arm(looperType)
+  
+  local lpPre = find_track_by_name("LP_PRE")
+  local lpPost = find_track_by_name("LP_POST")
+
+  if looperType == "pre_fx" then
+    -- PRE-FX should only select LP_PRE, not arm it
+    set_track_selected(lpPre, true)
+    set_record_output_stereo(lpPost, false)
+
+    log_debug("selected LP_PRE for pre_fx looper")
+  else
+    -- POST-FX still arms LP_POST normally
+    set_track_selected(lpPre, false)
+    set_record_output_stereo(lpPost, true)
+
+    log_debug("armed LP_POST for post_fx looper")
+  end
+
+  return true
+end
+
+local function clear_looper_record_arms()
+  local lpPre = find_track_by_name("LP_PRE")
+  local lpPost = find_track_by_name("LP_POST")
+
+  set_track_selected(lpPre, false)
+  set_record_output_stereo(lpPost, false)
+
+  log_debug("unselected LP_PRE and disarmed LP_POST")
 
   return true
 end
@@ -297,8 +458,51 @@ local function clear_fx_bus_sends_to_lp_post()
   end
 end
 
-local function apply_perform_output_routing()
+local function clear_input_sends_to_lp_pre()
+  local inputTrack = find_track_by_name("INPUT")
+  local lpPre = find_track_by_name("LP_PRE")
+
+  if inputTrack and lpPre then
+    remove_sends_to_track(inputTrack, lpPre)
+  end
+end
+
+local function clear_input_sends_to_fx_lanes()
+  local inputTrack = find_track_by_name("INPUT")
+  if not inputTrack then return end
+
+  local specs = get_lane_specs()
+
+  for i = 1, #specs do
+    local laneTrack = find_track_by_name(specs[i].id)
+    if laneTrack then
+      remove_sends_to_track(inputTrack, laneTrack)
+    end
+  end
+end
+
+local function clear_lp_pre_sends_to_fx_lanes()
+  local lpPre = find_track_by_name("LP_PRE")
+  if not lpPre then return end
+
+  local specs = get_lane_specs()
+
+  for i = 1, #specs do
+    local laneTrack = find_track_by_name(specs[i].id)
+    if laneTrack then
+      remove_sends_to_track(lpPre, laneTrack)
+    end
+  end
+end
+
+local function clear_looper_insert_routing()
   clear_fx_bus_sends_to_lp_post()
+  clear_input_sends_to_lp_pre()
+  clear_lp_pre_sends_to_fx_lanes()
+end
+
+local function apply_perform_output_routing()
+  clear_looper_insert_routing()
 
   for i = 1, #FX_BUS_IDS do
     local busTrack = find_track_by_name(FX_BUS_IDS[i])
@@ -307,10 +511,15 @@ local function apply_perform_output_routing()
     end
   end
 
+  local lpPre = find_track_by_name("LP_PRE")
+  if lpPre then
+    set_master_send(lpPre, false)
+  end
+  clear_looper_record_arms()
   return true
 end
 
-local function apply_looper_output_routing(state)
+local function apply_looper_postfx_routing(state)
   local activeBusId = normalize_bus_id(state and state.activeBusId) or "FX_1"
 
   local activeBusTrack = find_track_by_name(activeBusId)
@@ -323,7 +532,7 @@ local function apply_looper_output_routing(state)
     return false, "LP_POST track not found"
   end
 
-  clear_fx_bus_sends_to_lp_post()
+  clear_looper_insert_routing()
 
   for i = 1, #FX_BUS_IDS do
     local busId = FX_BUS_IDS[i]
@@ -338,20 +547,82 @@ local function apply_looper_output_routing(state)
   if not okSend then
     return false, sendErr or "failed to send active bus to LP_POST"
   end
+  apply_looper_record_arm("post_fx")
+  return true
+end
 
+local function apply_looper_prefx_routing(state)
+  local activeBusId = normalize_bus_id(state and state.activeBusId) or "FX_1"
+  local busMode = normalize_mode(state.busModes and state.busModes[activeBusId]) or "linear"
+
+  local inputTrack = find_track_by_name("INPUT")
+  local lpPre = find_track_by_name("LP_PRE")
+
+  if not inputTrack then
+    return false, "INPUT track not found"
+  end
+
+  if not lpPre then
+    return false, "LP_PRE track not found"
+  end
+
+  clear_looper_insert_routing()
+  clear_input_sends_to_fx_lanes()
+
+  set_master_send(lpPre, false)
+
+  for i = 1, #FX_BUS_IDS do
+    local busTrack = find_track_by_name(FX_BUS_IDS[i])
+    if busTrack then
+      set_master_send(busTrack, true)
+    end
+  end
+
+  local okInputSend, inputSendErr = ensure_send_to_track(inputTrack, lpPre)
+  if not okInputSend then
+    return false, inputSendErr or "failed to send INPUT to LP_PRE"
+  end
+
+  local specs = get_lane_specs()
+
+  for i = 1, #specs do
+    local spec = specs[i]
+
+    if spec.busId == activeBusId and lane_enabled_for_mode(spec.lane, busMode) then
+      local laneTrack = find_track_by_name(spec.id)
+
+      if not laneTrack then
+        return false, "missing active bus lane track: " .. tostring(spec.id)
+      end
+
+      local okLaneSend, laneSendErr = ensure_send_to_track(lpPre, laneTrack)
+      if not okLaneSend then
+        return false, laneSendErr or "failed to send LP_PRE to " .. tostring(spec.id)
+      end
+    end
+  end
+  apply_looper_record_arm("pre_fx")
   return true
 end
 
 local function apply_routing_for_app_mode(state)
+
   state = state or read_state()
 
-  local okRouting, routingErr = apply_routing_from_state(state)
+  local okRouting, routingErr =
+    apply_routing_from_state(state)
+
   if not okRouting then
     return false, routingErr
   end
 
   if state.mode == "looper" then
-    return apply_looper_output_routing(state)
+
+    if state.looperType == "pre_fx" then
+      return apply_looper_prefx_routing(state)
+    end
+
+    return apply_looper_postfx_routing(state)
   end
 
   return apply_perform_output_routing()
@@ -483,19 +754,25 @@ end
 local function exec_syncView(_payload)
   local ts = now_ms()
 
-  reaper.ShowConsoleMsg("[RFX] SYNCVIEW FROM RFX ts=" .. tostring(ts) .. "\n")
   log_debug("SYNCVIEW FROM RFX ts=" .. tostring(ts))
 
   local ok = exporter.export_vm()
 
   if not ok then
-    reaper.ShowConsoleMsg("[RFX] SYNCVIEW export_vm FAILED ts=" .. tostring(now_ms()) .. "\n")
     log_error("SYNCVIEW export_vm failed ts=" .. tostring(now_ms()))
+    reaper_log("vm", "syncView", {
+      ok = false,
+      error = "syncView export_vm failed",
+      ts = now_ms(),
+    })
     return false, "syncView export_vm failed"
   end
 
-  reaper.ShowConsoleMsg("[RFX] SYNCVIEW export_vm WROTE vm.json ts=" .. tostring(now_ms()) .. "\n")
   log_debug("SYNCVIEW export_vm wrote vm.json ts=" .. tostring(now_ms()))
+  reaper_log("vm", "syncView", {
+    ok = true,
+    ts = now_ms(),
+  })
   return true
 end
 
@@ -506,20 +783,24 @@ local function exec_selectActiveBus(payload)
   end
 
   local state = read_state()
+  local previousBusId = normalize_bus_id(state.activeBusId) or "FX_1"
+
   state.activeBusId = busId
 
   if not write_state(state) then
     return false, "failed to write state.json"
   end
 
-  local okRouting, routingErr = apply_routing_for_app_mode(state)
-    if not okRouting then
-      return false, "state saved but routing apply failed: " .. tostring(routingErr or "")
-    end
+  apply_active_bus_monitoring(previousBusId, busId)
 
-    request_vm_export("selectActiveBus")
-    return true
+  local okRouting, routingErr = apply_routing_for_app_mode(state)
+  if not okRouting then
+    return false, "state saved but routing apply failed: " .. tostring(routingErr or "")
   end
+
+  request_vm_export("selectActiveBus")
+  return true
+end
 
 local function exec_setRoutingMode(payload)
   local busId = normalize_bus_id(payload.busId)
@@ -795,25 +1076,164 @@ local function exec_refreshInstalledPlugins(_payload)
   return true
 end
 
+local function exec_setLooperType(payload)
+  local looperType = normalize_looper_type(payload and payload.looperType)
+
+  local state = read_state()
+  state.looperType = looperType
+
+  if not write_state(state) then
+    return false, "failed to write state.json"
+  end
+
+  local okRouting, routingErr = apply_routing_for_app_mode(state)
+  if not okRouting then
+    return false, "looper type saved but routing apply failed: " .. tostring(routingErr or "")
+  end
+
+  local okLooper, looperErr = looper.toggle_type({
+    looperType = looperType,
+  })
+
+  if not okLooper then
+    return false, "routing updated but looper type handler failed: " .. tostring(looperErr or "")
+  end
+
+  request_vm_export("setLooperType:" .. tostring(looperType))
+
+  return true, nil, {
+    looperType = looperType,
+  }
+end
+
+local function exec_setTimeSignature(payload)
+  payload = payload or {}
+
+  local beatsPerMeasure = tonumber(payload.beatsPerMeasure)
+  local noteLength = tonumber(payload.noteLength)
+
+  if not beatsPerMeasure then
+    return false, "invalid beatsPerMeasure"
+  end
+
+  if not noteLength then
+    return false, "invalid noteLength"
+  end
+
+  beatsPerMeasure = math.floor(beatsPerMeasure + 0.5)
+  noteLength = math.floor(noteLength + 0.5)
+
+  if beatsPerMeasure < 1 or beatsPerMeasure > 32 then
+    return false, "beatsPerMeasure out of range"
+  end
+
+  if noteLength ~= 1 and noteLength ~= 2 and noteLength ~= 4 and noteLength ~= 8 and noteLength ~= 16 and noteLength ~= 32 then
+    return false, "noteLength must be 1, 2, 4, 8, 16, or 32"
+  end
+
+  reaper.SetTempoTimeSigMarker(
+    0,      -- project
+    -1,     -- marker index: -1 edits project/default time signature
+    0,      -- time position
+    -1,     -- measure position, -1 = ignore
+    -1,     -- beat position, -1 = ignore
+    -1,     -- bpm, -1 = keep current tempo
+    beatsPerMeasure,
+    noteLength,
+    false   -- no sort needed for default marker
+  )
+
+  reaper_log("state", "setTimeSignature", {
+    beatsPerMeasure = beatsPerMeasure,
+    noteLength = noteLength,
+  })
+
+  return true, nil, {
+    beatsPerMeasure = beatsPerMeasure,
+    noteLength = noteLength,
+  }
+end
+
 local function exec_setTempo(payload)
-  local bpm = tonumber(payload and payload.bpm)
-  if not bpm or bpm <= 0 then
-    return false, "invalid tempo bpm"
+  local bpm = clamp_tempo_bpm(payload and payload.bpm)
+
+  if not bpm then
+    return false, "invalid bpm"
+  end
+
+  local state = read_state()
+  state.tempoBpm = bpm
+
+  if not write_state(state) then
+    return false, "failed to write state.json"
   end
 
   reaper.SetCurrentBPM(0, bpm, true)
 
-  local state = read_state()
-  state.tempoBpm = bpm
-  if not write_state(state) then
-    return false, "tempo updated but failed to persist state"
+  log_debug("setTempo bpm=" .. tostring(bpm))
+
+  return true, nil, {
+    tempoBpm = bpm,
+  }
+end
+
+local function normalize_bool(v)
+  return v == true
+end
+local function set_toggle_action_enabled(cmdId, enabled)
+  local isEnabled = reaper.GetToggleCommandState(cmdId) == 1
+
+  if isEnabled ~= enabled then
+    reaper.Main_OnCommand(cmdId, 0)
   end
 
-  log_debug("TEMPO updated bpm=" .. tostring(bpm))
-  reaper.ShowConsoleMsg("[RFX] TEMPO bpm=" .. tostring(bpm) .. "\n")
-  request_vm_export("setTempo")
+  return true
+end
 
-  return true, nil, { bpm = bpm }
+local function set_reaper_metronome_enabled(enabled)
+  return set_toggle_action_enabled(40364, enabled) -- Options: Toggle metronome
+end
+
+local function set_reaper_preroll_record_enabled(enabled)
+  return set_toggle_action_enabled(41819, enabled) -- Pre-roll: Toggle pre-roll on record
+end
+
+local function exec_setClickEnabled(payload)
+  local enabled = normalize_bool(payload and payload.enabled)
+
+  local state = read_state()
+  state.clickEnabled = enabled
+
+  if not write_state(state) then
+    return false, "failed to write state.json"
+  end
+
+  set_reaper_metronome_enabled(enabled)
+
+  log_debug("setClickEnabled enabled=" .. tostring(enabled))
+
+  return true, nil, {
+    clickEnabled = enabled,
+  }
+end
+
+local function exec_setCountInEnabled(payload)
+  local enabled = normalize_bool(payload and payload.enabled)
+
+  local state = read_state()
+  state.countInEnabled = enabled
+
+  if not write_state(state) then
+    return false, "failed to write state.json"
+  end
+
+  set_reaper_preroll_record_enabled(enabled)
+
+  log_debug("setCountInEnabled preRollBeforeRecording enabled=" .. tostring(enabled))
+
+  return true, nil, {
+    countInEnabled = enabled,
+  }
 end
 
 local function exec_setMode(modeName, payload)
@@ -828,7 +1248,7 @@ local function exec_setMode(modeName, payload)
   if not write_state(state) then
     return false, "failed to write state.json"
   end
-
+  
   local okRouting, routingErr = apply_routing_for_app_mode(state)
     if not okRouting then
       return false, "mode saved but routing apply failed: " .. tostring(routingErr or "")
@@ -840,14 +1260,6 @@ local function exec_setMode(modeName, payload)
   if okEncode and encoded then
     payloadStr = tostring(encoded)
   end
-
-  reaper.ShowConsoleMsg(
-    "[RFX] MODE switched mode=" ..
-    tostring(mode) ..
-    " payload=" ..
-    payloadStr ..
-    "\n"
-  )
 
   log_debug(
     "MODE switched mode=" ..
@@ -883,10 +1295,16 @@ local function execute_command(cmd)
     return exec_getPluginParams(payload)
   elseif name == "setParamValue" then
     return exec_setParamValue(payload)
-  elseif name == "setTempo" then
-    return exec_setTempo(payload)
   elseif name == "refreshInstalledPlugins" then
     return exec_refreshInstalledPlugins(payload)
+  elseif name == "setTempo" then
+    return exec_setTempo(payload)
+  elseif name == "setClickEnabled" then
+    return exec_setClickEnabled(payload)
+  elseif name == "setCountInEnabled" then
+    return exec_setCountInEnabled(payload)
+  elseif name == "setTimeSignature" then
+    return exec_setTimeSignature(payload)
     
   elseif name == "setPerformMode" then
     return exec_setMode("perform", payload)
@@ -898,7 +1316,7 @@ local function execute_command(cmd)
     return exec_setMode("automation", payload)
   elseif name == "setTunerMode" then
     return exec_setMode("tuner", payload)
-    
+
   elseif name == "startLooperRecord" then
     return looper.start_record(payload)
   elseif name == "stopLooperRecord" then
@@ -911,10 +1329,21 @@ local function execute_command(cmd)
     return looper.undo_overdub(payload)
   elseif name == "undoLooperRecord" then
     return looper.undo_record(payload)
-  elseif name == "clearLooper" then
-    return looper.clear(payload)
-  elseif name == "toggleLooperType" then
-    return looper.toggle_type(payload)
+ elseif name == "clearLooper"
+     or name == "deleteLoopAudio"
+     or name == "deleteLooperAudio"
+     or name == "clearLoopAudio" then
+ 
+     payload.reason = payload.reason or name
+     return looper.clear(payload)
+ 
+   elseif name == "setLoopLengthEnabled" then
+     return looper.set_loop_length_enabled(payload)
+  elseif name == "setLoopLength" then
+    return looper.set_loop_length(payload)
+
+  elseif name == "setLooperType" or name == "toggleLooperType" then
+    return exec_setLooperType(payload)
   
   
   end
@@ -936,8 +1365,18 @@ local function process_once()
     local okVm = exporter.export_vm()
     if okVm then
       log_debug("deferred export_vm() success")
+      reaper_log("vm", "exportVm", {
+        ok = true,
+        reason = "deferred",
+        ts = now_ms(),
+      })
     else
       log_error("deferred export_vm() failed")
+      reaper_log("vm", "exportVm", {
+        ok = false,
+        reason = "deferred",
+        ts = now_ms(),
+      })
     end
   end
 
@@ -963,25 +1402,16 @@ local function process_once()
       local cmdId = tostring(cmd.id or "")
       
       log_debug("Received command: " .. cmdName .. " id=" .. cmdId)
-      reaper.ShowConsoleMsg("[RFX] CMD received name=" .. cmdName .. " id=" .. cmdId .. "\n")
+      reaper_log("cmd", cmdName, cmd.payload or {})
       
       local okExec, okFlag, err, extra = pcall(execute_command, cmd)
       
       if okExec then
         write_result(cmd.id, cmd.name, okFlag, err, extra)
         log_debug("Command result: ok=" .. tostring(okFlag) .. " err=" .. tostring(err or ""))
-        reaper.ShowConsoleMsg(
-          "[RFX] CMD result name=" .. cmdName ..
-          " ok=" .. tostring(okFlag) ..
-          " err=" .. tostring(err or "") .. "\n"
-        )
       else
         write_result(cmd.id, cmd.name, false, "runtime error: " .. tostring(okFlag))
         log_error("Runtime error while executing command: " .. tostring(okFlag))
-        reaper.ShowConsoleMsg(
-          "[RFX] CMD runtime error name=" .. cmdName ..
-          " err=" .. tostring(okFlag) .. "\n"
-        )
       end
 
       delete_file(cmdPath)
@@ -997,7 +1427,8 @@ log_debug("Watcher started. IPC dir=" .. get_ipc_dir())
 do
   local s = read_state()
   write_state(s)
-
+  set_reaper_metronome_enabled(s.clickEnabled == true)
+  set_reaper_preroll_record_enabled(s.countInEnabled == true)
   local okRouting, errRouting = apply_routing_for_app_mode(s)
   if okRouting then
     log_debug("routing state applied at startup")
@@ -1008,8 +1439,18 @@ do
   local okVm = exporter.export_vm()
   if okVm then
     log_debug("vm.json exported at startup")
+    reaper_log("vm", "exportVm", {
+      ok = true,
+      reason = "startup",
+      ts = now_ms(),
+    })
   else
     log_error("failed to export vm.json at startup")
+    reaper_log("vm", "exportVm", {
+      ok = false,
+      reason = "startup",
+      ts = now_ms(),
+    })
   end
 end
 

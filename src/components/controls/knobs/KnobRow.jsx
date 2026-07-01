@@ -653,8 +653,12 @@ export function KnobRow({
                 key={sliderKnob.id}
                 id={sliderKnob.id}
                 label={sliderKnob.label}
-                mapped={!!sliderKnob.mapped}
-                mappedLabel={sliderKnob.mappedLabel || (sliderKnob.mapped ? "Mapped" : "")}
+                mapped={sliderBusVolumeTargetBusId ? true : !!sliderKnob.mapped}
+                mappedLabel={
+                  sliderBusVolumeTargetBusId
+                    ? `BUS VOL • ${sliderBusVolumeTargetBusId}`
+                    : sliderKnob.mappedLabel || (sliderKnob.mapped ? "Mapped" : "")
+                }
                 value={renderValueFor(sliderKnob)}
                 mappingArmed={!!mappingArmed}
                 onTap={onKnobTap}
@@ -664,8 +668,6 @@ export function KnobRow({
                   const vv = Number.isFinite(localValues?.[sliderKnob.id]) ? localValues[sliderKnob.id] : sliderKnob.value;
                   if (sliderBusVolumeTargetBusId) onSliderMappedCommit?.(clamp01(vv));
                 }}
-                mappedLabel={sliderBusVolumeTargetBusId ? `BUS VOL • ${sliderBusVolumeTargetBusId}` : sliderKnob.mappedLabel}
-                mapped={sliderBusVolumeTargetBusId ? true : sliderKnob.mapped}
                 onDropMap={onDropMap}
                 mapDragActive={mapDragActive}
                 canAcceptMap={canAcceptMapForKnob(sliderKnob.id)}

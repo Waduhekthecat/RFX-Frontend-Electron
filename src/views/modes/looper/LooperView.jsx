@@ -9,6 +9,8 @@ import {
   DEFAULT_LOOPER_TYPE,
   DEFAULT_SESSION_CLICK_ENABLED,
   DEFAULT_SESSION_COUNT_IN_ENABLED,
+  DEFAULT_SESSION_BEATS_PER_MEASURE,
+  DEFAULT_SESSION_NOTE_LENGTH,
   DEFAULT_SESSION_TEMPO_BPM,
   useRfxStore,
 } from "../../../core/rfx/Store";
@@ -31,6 +33,14 @@ const MAX_TAP_TEMPO_TIMES = 4;
 const MIN_TEMPO_BPM = 40;
 const MAX_TEMPO_BPM = 240;
 const EMPTY_OBJ = Object.freeze({});
+const LOOP_LENGTH_VALUES = [4, 8, 16, 32, 2];
+const BEATS_PER_MEASURE_VALUES = [4, 6, 7, 8, 16, 2, 3];
+const NOTE_LENGTH_VALUES = [4, 8, 16, 2];
+
+const cycleValue = (values, currentValue) => {
+  const currentIndex = values.indexOf(Number(currentValue));
+  return values[(currentIndex + 1) % values.length];
+};
 
 const LOOPER_GESTURES = Object.freeze({
   FS_A_LONG: "FS_A_LONG",
@@ -151,6 +161,13 @@ export function LooperView() {
   const countInEnabled = useRfxStore(
     (state) => state.session?.countInEnabled ?? DEFAULT_SESSION_COUNT_IN_ENABLED
   );
+  const beatsPerMeasure = useRfxStore(
+    (state) =>
+      state.session?.beatsPerMeasure ?? DEFAULT_SESSION_BEATS_PER_MEASURE
+  );
+  const noteLength = useRfxStore(
+    (state) => state.session?.noteLength ?? DEFAULT_SESSION_NOTE_LENGTH
+  );
   const selectedBusId = useRfxStore(
     (state) => state.perf?.activeBusId ?? state.session?.activeBusId ?? null
   );
@@ -187,6 +204,11 @@ export function LooperView() {
   const setLooperClickEnabled = useRfxStore((state) => state.setLooperClickEnabled);
   const setLooperCountInEnabled = useRfxStore((state) => state.setLooperCountInEnabled);
   const setLooperTempoBpm = useRfxStore((state) => state.setLooperTempoBpm);
+  const setLoopLengthEnabled = useRfxStore(
+    (state) => state.setLoopLengthEnabled
+  );
+  const setLoopLength = useRfxStore((state) => state.setLoopLength);
+  const setTimeSignature = useRfxStore((state) => state.setTimeSignature);
 
   const isRecording = looper.status === "recording";
   const isPlaying =
@@ -194,6 +216,7 @@ export function LooperView() {
   const isOverdubbing = looper.status === "overdubbing";
   const hasRecordedLoop = looper.lengthMs > 0;
   const recordCount = looper.recordCount ?? 0;
+  const isLoopLengthLocked = recordCount > 0 || isRecording || isOverdubbing;
 
   const looperTypeIndex = Math.max(
     LOOPER_TYPES.findIndex((type) => type.id === looperType),
@@ -658,6 +681,52 @@ export function LooperView() {
     setLooperCountInEnabled,
   ]);
 
+  const toggleLoopLength = useCallback(() => {
+    if (isLoopLengthLocked) return;
+    const nextEnabled = !looper.loopLengthEnabled;
+    setLoopLengthEnabled(nextEnabled);
+    dispatchLooperIntent("setLoopLengthEnabled", { enabled: nextEnabled });
+  }, [
+    dispatchLooperIntent,
+    isLoopLengthLocked,
+    looper.loopLengthEnabled,
+    setLoopLengthEnabled,
+  ]);
+
+  const cycleLoopLength = useCallback(() => {
+    const nextLoopLength = cycleValue(
+      LOOP_LENGTH_VALUES,
+      looper.loopLength
+    );
+    setLoopLength(nextLoopLength);
+    dispatchLooperIntent("setLoopLength", { bars: nextLoopLength });
+  }, [dispatchLooperIntent, looper.loopLength, setLoopLength]);
+
+  const updateTimeSignature = useCallback(
+    (nextBeatsPerMeasure, nextNoteLength) => {
+      setTimeSignature(nextBeatsPerMeasure, nextNoteLength);
+      dispatchLooperIntent("setTimeSignature", {
+        beatsPerMeasure: nextBeatsPerMeasure,
+        noteLength: nextNoteLength,
+      });
+    },
+    [dispatchLooperIntent, setTimeSignature]
+  );
+
+  const cycleBeatsPerMeasure = useCallback(() => {
+    updateTimeSignature(
+      cycleValue(BEATS_PER_MEASURE_VALUES, beatsPerMeasure),
+      noteLength
+    );
+  }, [beatsPerMeasure, noteLength, updateTimeSignature]);
+
+  const cycleNoteLength = useCallback(() => {
+    updateTimeSignature(
+      beatsPerMeasure,
+      cycleValue(NOTE_LENGTH_VALUES, noteLength)
+    );
+  }, [beatsPerMeasure, noteLength, updateTimeSignature]);
+
   const clearLoopPreview = useCallback(() => {
     recordingStartRef.current = null;
     playbackStartRef.current = null;
@@ -691,10 +760,16 @@ export function LooperView() {
         clearLoopPreview();
         historyRef.current = [];
         dispatchLooperIntent("clearLooper");
+        dispatchLooperIntent("setLoopLengthEnabled", { enabled: false });
+        // dispatchLooperIntent("setLoopLength", {
+        //   bars: DEFAULT_LOOPER_STATE.loopLength,
+        // });
         updateLooperWithDebug("[LOOPER DELETE AUDIO]", {
           status: "idle",
           lengthMs: 0,
           recordCount: 0,
+          loopLengthEnabled: false,
+          loopLength: DEFAULT_LOOPER_STATE.loopLength,
         });
       }
 
@@ -1133,6 +1208,15 @@ export function LooperView() {
                     onToggleClick={toggleClick}
                     isCountInEnabled={countInEnabled}
                     onToggleCountIn={toggleCountIn}
+                    loopLengthEnabled={looper.loopLengthEnabled}
+                    isLoopLengthLocked={isLoopLengthLocked}
+                    loopLength={looper.loopLength}
+                    onToggleLoopLength={toggleLoopLength}
+                    onCycleLoopLength={cycleLoopLength}
+                    beatsPerMeasure={beatsPerMeasure}
+                    noteLength={noteLength}
+                    onCycleBeatsPerMeasure={cycleBeatsPerMeasure}
+                    onCycleNoteLength={cycleNoteLength}
                   />
                 </div>
 

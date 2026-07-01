@@ -35,11 +35,20 @@ function asLooperState(v) {
 
   if (!source) return null;
 
-  return {
+  const looper = {
     status: asLooperStatus(source?.status, "idle"),
     lengthMs: Math.max(0, asNum(source?.lengthMs, 0)),
     recordCount: Math.max(0, Math.floor(asNum(source?.recordCount ?? source?.record_count, 0))),
   };
+
+  if (hasValue(source?.loopLengthEnabled)) {
+    looper.loopLengthEnabled = !!source.loopLengthEnabled;
+  }
+  if (hasValue(source?.loopLength)) {
+    looper.loopLength = Number(source.loopLength);
+  }
+
+  return looper;
 }
 
 function hasValue(v) {
@@ -64,6 +73,16 @@ function asSessionBool(v, key) {
     v?.looper?.[key];
 
   return hasValue(raw) ? !!raw : null;
+}
+
+function asSessionNumber(v, key) {
+  const raw =
+    v?.session?.[key] ??
+    v?.[key] ??
+    v?.session?.looper?.[key] ??
+    v?.looper?.[key];
+
+  return hasValue(raw) ? Number(raw) : null;
 }
 
 export function normalize(view) {
@@ -263,6 +282,8 @@ export function normalize(view) {
         tempoBpm: asSessionTempoBpm(v),
         clickEnabled: asSessionBool(v, "clickEnabled"),
         countInEnabled: asSessionBool(v, "countInEnabled"),
+        beatsPerMeasure: asSessionNumber(v, "beatsPerMeasure"),
+        noteLength: asSessionNumber(v, "noteLength"),
       },
 
       entities: {
@@ -318,6 +339,8 @@ export function normalize(view) {
     tempoBpm: asSessionTempoBpm(v),
     clickEnabled: asSessionBool(v, "clickEnabled"),
     countInEnabled: asSessionBool(v, "countInEnabled"),
+    beatsPerMeasure: asSessionNumber(v, "beatsPerMeasure"),
+    noteLength: asSessionNumber(v, "noteLength"),
   };
 
   const tracks = Array.isArray(v?.tracks) ? v.tracks : [];
