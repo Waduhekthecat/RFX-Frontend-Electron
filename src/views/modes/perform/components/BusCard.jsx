@@ -131,8 +131,10 @@ export function BusCard({
   );
   const fxByGuid = useRfxStore((s) => s.entities.fxByGuid || {});
   const fxOverlay = useRfxStore((s) => s.ops.overlay.fx || {});
+  const setActiveTrackGuid = useRfxStore((s) => s.setActiveTrackGuid);
 
   const goEdit = React.useCallback((lane) => {
+    setActiveTrackGuid(`${busId}${lane}`);
     modeManager.setMode(RFX_MODES.EDIT, {
       dispatchIfUnchanged: true,
       source: "ui",
@@ -143,7 +145,7 @@ export function BusCard({
         lane,
       },
     });
-  }, [busId, navigate]);
+  }, [busId, navigate, setActiveTrackGuid]);
 
   function onDragStartMap(e) {
     e.stopPropagation();

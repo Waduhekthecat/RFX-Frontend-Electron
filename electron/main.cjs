@@ -2,6 +2,7 @@ const path = require("path");
 const fs = require("fs");
 const fsp = require("fs/promises");
 const { spawn } = require("child_process");
+const dgram = require("dgram");
 const { app, BrowserWindow, ipcMain, screen } = require("electron");
 const osc = require("osc");
 
@@ -22,6 +23,7 @@ let liveVm = createFallbackVm();
 let liveInstalledFx = [];
 let watchers = null;
 let oscPort = null;
+let oscListenerSocket = null;
 let reaperProcess = null;
 let readinessPollTimer = null;
 let looperInputGainWrite = null;
@@ -79,6 +81,158 @@ function ensureOscPort() {
 
   oscPort.open();
   return oscPort;
+}
+
+function getCurrentAppMode() {
+  try {
+    const statePath = path.join("/tmp/rfx-ipc", "state.json");
+    if (!fs.existsSync(statePath)) return "perform";
+
+    const raw = fs.readFileSync(statePath, "utf8");
+    if (!raw) return "perform";
+
+    const parsed = JSON.parse(raw);
+    return String(parsed?.mode || "perform").toLowerCase();
+  } catch {
+    return "perform";
+  }
+}
+
+function ensureOscListener() {
+  if (oscListenerSocket) return oscListenerSocket;
+
+  oscListenerSocket = dgram.createSocket("udp4");
+
+  oscListenerSocket.on("message", (buffer, rinfo) => {
+    try {
+      const mode = getCurrentAppMode();
+      if (mode !== "tuner") {
+        return;
+      }
+
+      const messages = parseOscMessages(buffer);
+      for (const message of messages) {
+        if (message.address !== "/rfx/tuner") {
+          continue;
+        }
+
+        const [note, octave, cents, _confidence, hasPitch] = message.args;
+        const hasPitchValue = Number(hasPitch);
+
+        if (!Number.isFinite(hasPitchValue) || hasPitchValue === 0) {
+          console.log("[RFX OSC] --");
+          continue;
+        }
+
+        const noteText = String(note ?? "?").trim() || "?";
+        const octaveText = Number.isFinite(Number(octave)) ? String(Number(octave)) : "";
+        const centsValue = Number(cents);
+        const centsText = `${Number.isFinite(centsValue) && centsValue >= 0 ? "+" : ""}${Number.isFinite(centsValue) ? centsValue.toFixed(1) : "0.0"}¢`;
+
+        console.log(`[RFX OSC] ${noteText}${octaveText}  ${centsText}`);
+      }
+    } catch (error) {
+      // Ignore malformed or non-message OSC packets from REAPER.
+    }
+  });
+
+  oscListenerSocket.on("error", (error) => {
+    console.error("[RFX OSC] listener error", error);
+  });
+
+  oscListenerSocket.bind(19090, "0.0.0.0", () => {
+    console.log("[RFX OSC] listening on udp://0.0.0.0:19090");
+  });
+
+  return oscListenerSocket;
+}
+
+function readPaddedString(buffer, offset) {
+  let end = offset;
+  while (end < buffer.length && buffer[end] !== 0) {
+    end += 1;
+  }
+
+  const value = buffer.subarray(offset, end).toString("utf8");
+  const paddedLength = Math.ceil((end - offset + 1) / 4) * 4;
+  return { value, nextOffset: offset + paddedLength };
+}
+
+function parseOscMessages(buffer) {
+  if (!buffer || buffer.length < 8) {
+    return [];
+  }
+
+  let offset = 0;
+  const first = readPaddedString(buffer, offset);
+  const address = first.value;
+  offset = first.nextOffset;
+
+  if (address === "#bundle") {
+    const messages = [];
+    offset += 8;
+
+    while (offset < buffer.length) {
+      const sizeInfo = readPaddedString(buffer, offset);
+      const size = Number(sizeInfo.value || 0);
+      offset = sizeInfo.nextOffset;
+
+      if (!Number.isFinite(size) || size <= 0 || offset + size > buffer.length) {
+        break;
+      }
+
+      const nested = buffer.subarray(offset, offset + size);
+      offset += size;
+      messages.push(...parseOscMessages(nested));
+    }
+
+    return messages;
+  }
+
+  const typeInfo = readPaddedString(buffer, offset);
+  offset = typeInfo.nextOffset;
+
+  const typeTag = String(typeInfo.value || "");
+  if (!typeTag.startsWith(",")) {
+    return [];
+  }
+
+  const args = [];
+  for (let i = 1; i < typeTag.length; i += 1) {
+    const tag = typeTag[i];
+
+    switch (tag) {
+      case "s": {
+        const stringInfo = readPaddedString(buffer, offset);
+        args.push(stringInfo.value);
+        offset = stringInfo.nextOffset;
+        break;
+      }
+      case "i": {
+        const value = buffer.readInt32BE(offset);
+        args.push(value);
+        offset += 4;
+        break;
+      }
+      case "f": {
+        const value = buffer.readFloatBE(offset);
+        args.push(value);
+        offset += 4;
+        break;
+      }
+      case "T":
+        args.push(true);
+        break;
+      case "F":
+        args.push(false);
+        break;
+      default:
+        args.push(null);
+        break;
+    }
+  }
+
+  return [{ address, args }];
 }
 
 function toOscArg(value) {
@@ -409,6 +563,7 @@ app.whenReady().then(async () => {
 
   await clearRuntimeIpcArtifacts();
   await bootIpc();
+  ensureOscListener();
 
   createWindow();
   // MIDI is initialized after the window exists so midiMain can forward
@@ -435,5 +590,6 @@ app.on("before-quit", async () => {
   try { closeMidiMain(); } catch {}
   try { watchers?.stop(); } catch {}
   try { oscPort?.close(); } catch {}
+  try { oscListenerSocket?.close(); } catch {}
   try { await clearRuntimeIpcArtifacts(); } catch {}
 });

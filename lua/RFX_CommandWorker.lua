@@ -100,6 +100,267 @@ end
 local lastTickLog = 0
 local pending_vm_export = false
 
+
+-- ============================================================
+-- RFX TUNER GMEM BRIDGE
+-- JSFX should write tuner data to gmem namespace "RFX_TUNER".
+-- CommandWorker polls it and writes /tmp/rfx-ipc/tuner.json for Electron.
+--
+-- gmem layout:
+--   0 = hasPitch       (1/0)
+--   1 = midiNote       (number)
+--   2 = cents          (number)
+--   3 = direction      (-1, 0, 1 or similar)
+--   4 = confidence     (0..1)
+--   5 = bendCentered   (1/0)
+--   6 = eventCount     (incrementing value from JSFX)
+-- ============================================================
+reaper.gmem_attach("RFX_TUNER")
+
+local noteNames = {
+  "C", "C#", "D", "D#", "E", "F",
+  "F#", "G", "G#", "A", "A#", "B"
+}
+
+local lastTunerEventCount = -1
+local lastTunerWriteMs = 0
+
+local function midi_to_note(midi)
+  midi = math.floor((tonumber(midi) or 0) + 0.5)
+  local name = noteNames[(midi % 12) + 1]
+  local octave = math.floor(midi / 12) - 1
+  return name, octave
+end
+
+local function read_tuner()
+  local hasPitch = reaper.gmem_read(0) == 1
+  local midiNote = math.floor((tonumber(reaper.gmem_read(1)) or 0) + 0.5)
+  local note, octave = midi_to_note(midiNote)
+
+  return {
+    hasPitch = hasPitch,
+    midiNote = midiNote,
+    note = note,
+    octave = octave,
+    cents = tonumber(reaper.gmem_read(2)) or 0,
+    direction = tonumber(reaper.gmem_read(3)) or 0,
+    confidence = tonumber(reaper.gmem_read(4)) or 0,
+    bendCentered = reaper.gmem_read(5) == 1,
+    eventCount = tonumber(reaper.gmem_read(6)) or 0,
+  }
+end
+
+local function tuner_path()
+  return get_ipc_dir() .. "/tuner.json"
+end
+
+
+local function tuner_osc_queue_path()
+  return get_ipc_dir() .. "/tuner_osc_queue.jsonl"
+end
+
+local function tuner_osc_bridge_path()
+  return get_ipc_dir() .. "/rfx_osc_bridge.py"
+end
+
+local function write_tuner_osc_bridge_script()
+  local script = [=[
+#!/usr/bin/env python3
+import json
+import os
+import socket
+import struct
+import time
+import fcntl
+
+IPC_DIR = "/tmp/rfx-ipc"
+QUEUE_PATH = os.path.join(IPC_DIR, "tuner_osc_queue.jsonl")
+LOCK_PATH = os.path.join(IPC_DIR, "rfx_osc_bridge.lock")
+LOG_PATH = os.path.join(IPC_DIR, "rfx_osc_bridge.log")
+DEST_IP = "127.0.0.1"
+DEST_PORT = 19090
+OSC_ADDRESS = "/rfx/tuner"
+
+def log(msg):
+    try:
+        with open(LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(f"[{time.time():.3f}] {msg}\n")
+    except Exception:
+        pass
+
+def pad4(data: bytes) -> bytes:
+    return data + (b"\0" * ((4 - (len(data) % 4)) % 4))
+
+def osc_string(value: str) -> bytes:
+    return pad4(str(value).encode("utf-8") + b"\0")
+
+def osc_int(value) -> bytes:
+    return struct.pack(">i", int(value))
+
+def osc_float(value) -> bytes:
+    return struct.pack(">f", float(value))
+
+def make_tuner_packet(item: dict) -> bytes:
+    # /rfx/tuner string note, int octave, float cents, float confidence, int hasPitch
+    note = item.get("note") or "--"
+    octave = int(item.get("octave") or 0)
+    cents = float(item.get("cents") or 0.0)
+    confidence = float(item.get("confidence") or 0.0)
+    has_pitch = 1 if item.get("hasPitch") else 0
+
+    return b"".join([
+        osc_string(OSC_ADDRESS),
+        osc_string(",siffi"),
+        osc_string(note),
+        osc_int(octave),
+        osc_float(cents),
+        osc_float(confidence),
+        osc_int(has_pitch),
+    ])
+
+def main():
+    os.makedirs(IPC_DIR, exist_ok=True)
+    open(QUEUE_PATH, "a", encoding="utf-8").close()
+
+    lock_file = open(LOCK_PATH, "w", encoding="utf-8")
+    try:
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        # Another bridge is already running.
+        return
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    log(f"OSC bridge started -> {DEST_IP}:{DEST_PORT} address={OSC_ADDRESS}")
+
+    with open(QUEUE_PATH, "r", encoding="utf-8") as q:
+        q.seek(0, os.SEEK_END)
+
+        while True:
+            line = q.readline()
+            if not line:
+                time.sleep(0.01)
+                continue
+
+            line = line.strip()
+            if not line:
+                continue
+
+            try:
+                item = json.loads(line)
+                packet = make_tuner_packet(item)
+                sock.sendto(packet, (DEST_IP, DEST_PORT))
+            except Exception as exc:
+                log(f"send failed: {exc!r} line={line[:250]}")
+
+if __name__ == "__main__":
+    main()
+]=]
+
+  write_file(tuner_osc_bridge_path(), script)
+end
+
+local function ensure_tuner_osc_bridge()
+  write_tuner_osc_bridge_script()
+
+  -- Start a persistent Python OSC bridge in the background.
+  -- The Python script uses a file lock, so rerunning CommandWorker should not create duplicates.
+  local cmd =
+    "/usr/bin/env python3 " ..
+    string.format("%q", tuner_osc_bridge_path()) ..
+    " >/tmp/rfx-ipc/rfx_osc_bridge_stdout.log 2>/tmp/rfx-ipc/rfx_osc_bridge_stderr.log &"
+
+  os.execute(cmd)
+  log_debug("requested tuner OSC bridge start: " .. tuner_osc_bridge_path())
+end
+
+local function send_tuner_osc(tuner)
+  local ok, encoded = pcall(json.encode, {
+    ts = now_ms(),
+    hasPitch = tuner.hasPitch,
+    midiNote = tuner.midiNote,
+    note = tuner.note,
+    octave = tuner.octave,
+    cents = tuner.cents,
+    direction = tuner.direction,
+    confidence = tuner.confidence,
+    bendCentered = tuner.bendCentered,
+    eventCount = tuner.eventCount,
+  })
+
+  if ok and encoded then
+    append_file(tuner_osc_queue_path(), encoded .. "\n")
+    return true
+  end
+
+  return false
+end
+
+local function poll_tuner_bridge(state)
+  state = state or read_state()
+
+  -- Only publish/log live tuner state while the app is in tuner mode.
+  if state.mode ~= "tuner" then
+    return true
+  end
+
+  local tuner = read_tuner()
+  local t = now_ms()
+
+  local eventChanged = tuner.eventCount ~= lastTunerEventCount
+  local dueRefresh = (t - lastTunerWriteMs) >= 100
+
+  -- Do not spam the console, JSON file, or OSC bridge on every defer tick.
+  -- This keeps output live but capped to roughly 30 FPS.
+  if (not eventChanged and not dueRefresh) or (t - lastTunerWriteMs) < 33 then
+    return true
+  end
+
+  if eventChanged then
+    if tuner.hasPitch then
+      reaper.ShowConsoleMsg(
+        string.format(
+          "[RFX TUNER] %s%d  %+0.1f¢\n",
+          tuner.note,
+          tuner.octave,
+          tuner.cents
+        )
+      )
+    else
+      reaper.ShowConsoleMsg("[RFX TUNER] --\n")
+    end
+  end
+
+  if not tuner.hasPitch then
+    lastTunerEventCount = tuner.eventCount
+    lastTunerWriteMs = t
+    return true
+  end
+
+  lastTunerEventCount = tuner.eventCount
+  lastTunerWriteMs = t
+
+  local payload = {
+    ts = t,
+    hasPitch = tuner.hasPitch,
+    midiNote = tuner.midiNote,
+    note = tuner.note,
+    octave = tuner.octave,
+    cents = tuner.cents,
+    direction = tuner.direction,
+    confidence = tuner.confidence,
+    bendCentered = tuner.bendCentered,
+    eventCount = tuner.eventCount,
+  }
+
+  -- Keep JSON output for debugging/Electron fallback.
+  local okJson = write_json(tuner_path(), payload)
+
+  -- Send live OSC via the persistent Python UDP bridge.
+  send_tuner_osc(tuner)
+
+  return okJson
+end
+
 local function request_vm_export(reason)
   pending_vm_export = true
   local why = tostring(reason or "unknown")
@@ -1380,6 +1641,9 @@ local function process_once()
     end
   end
 
+  local stateForTuner = read_state()
+  poll_tuner_bridge(stateForTuner)
+
   local cmdPath = get_ipc_dir() .. "/cmd.json"
   local raw = read_file(cmdPath)
 
@@ -1423,6 +1687,7 @@ end
 
 write_heartbeat()
 log_debug("Watcher started. IPC dir=" .. get_ipc_dir())
+ensure_tuner_osc_bridge()
 
 do
   local s = read_state()

@@ -388,10 +388,22 @@ export function EditView() {
   return <EditMainView location={location} />;
 }
 
+function parseTrackGuid(trackGuid) {
+  const raw = canonicalTrackGuid(String(trackGuid || "").trim());
+  const match = raw.match(/^([A-Za-z0-9_]+)([ABC])$/);
+  return match
+    ? { busId: match[1], lane: match[2] }
+    : { busId: "", lane: "" };
+}
+
 function EditMainView({ location }) {
   const navigate = useNavigate();
   const vm = useTransportVM();
   const intent = useIntent();
+  const setActiveTrackGuid = useRfxStore((s) => s.setActiveTrackGuid);
+  const sessionActiveTrackGuid = useRfxStore(
+    (s) => String(s.session?.activeTrackGuid || "")
+  );
 
   const activeBusId = vm?.activeBusId || vm?.buses?.[0]?.id || "FX_1";
   const bus =
@@ -407,24 +419,57 @@ function EditMainView({ location }) {
   const validRequestedLane =
     requestedBusId === bus.id && availableLanes(mode).includes(requestedLane);
 
+  const sessionSelection = React.useMemo(
+    () => parseTrackGuid(sessionActiveTrackGuid),
+    [sessionActiveTrackGuid]
+  );
+  const sessionRequestedBusId = sessionSelection.busId;
+  const sessionRequestedLane = sessionSelection.lane;
+  const validSessionRequestedLane =
+    sessionRequestedBusId === bus.id &&
+    availableLanes(mode).includes(sessionRequestedLane);
+
   const [laneByBus, setLaneByBus] = React.useState({});
-  const lane = validRequestedLane
+  const lane = validSessionRequestedLane
+    ? sessionRequestedLane
+    : validRequestedLane
     ? requestedLane
     : nextValidLane(mode, laneByBus[bus.id]);
 
   React.useEffect(() => {
     setLaneByBus((prev) => {
       const next = { ...prev };
-      next[bus.id] = validRequestedLane
-        ? requestedLane
-        : nextValidLane(mode, next[bus.id]);
+      if (validSessionRequestedLane) {
+        next[bus.id] = sessionRequestedLane;
+      } else if (validRequestedLane) {
+        next[bus.id] = requestedLane;
+      } else {
+        next[bus.id] = nextValidLane(mode, next[bus.id]);
+      }
       return next;
     });
 
-    if (validRequestedLane) {
+    if (validSessionRequestedLane) {
+      setActiveTrackGuid(`${bus.id}${sessionRequestedLane}`);
+    }
+
+    if ((validSessionRequestedLane || validRequestedLane) &&
+        (location.state?.busId || location.state?.lane)) {
       navigate(location.pathname, { replace: true, state: null });
     }
-  }, [bus.id, location.pathname, mode, navigate, requestedLane, validRequestedLane]);
+  }, [
+    bus.id,
+    location.pathname,
+    location.state?.busId,
+    location.state?.lane,
+    mode,
+    navigate,
+    requestedLane,
+    validRequestedLane,
+    validSessionRequestedLane,
+    sessionRequestedLane,
+    setActiveTrackGuid,
+  ]);
 
   function setLane(L) {
     setLaneByBus((prev) => ({ ...prev, [bus.id]: L }));
