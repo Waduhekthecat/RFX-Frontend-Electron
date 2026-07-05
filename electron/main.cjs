@@ -120,6 +120,12 @@ function ensureOscListener() {
         const hasPitchValue = Number(hasPitch);
 
         if (!Number.isFinite(hasPitchValue) || hasPitchValue === 0) {
+          safeSend("rfx:tuner", {
+            hasPitch: 0,
+            note: null,
+            octave: null,
+            cents: null,
+          });
           console.log("[RFX OSC] --");
           continue;
         }
@@ -128,6 +134,13 @@ function ensureOscListener() {
         const octaveText = Number.isFinite(Number(octave)) ? String(Number(octave)) : "";
         const centsValue = Number(cents);
         const centsText = `${Number.isFinite(centsValue) && centsValue >= 0 ? "+" : ""}${Number.isFinite(centsValue) ? centsValue.toFixed(1) : "0.0"}¢`;
+
+        safeSend("rfx:tuner", {
+          hasPitch: 1,
+          note: noteText,
+          octave: Number.isFinite(Number(octave)) ? Number(octave) : null,
+          cents: Number.isFinite(centsValue) ? centsValue : null,
+        });
 
         console.log(`[RFX OSC] ${noteText}${octaveText}  ${centsText}`);
       }

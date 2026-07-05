@@ -175,12 +175,19 @@ export function VerticalKnobSlider({
 
     if (!startRef.current && pendingPressRef.current) {
       const movePx = Math.abs(e.clientY - pendingPressRef.current.y);
-      if (movePx >= 3) {
+      if (movePx >= 1) {
         clearLongPressTimer();
         startRef.current = pendingPressRef.current;
         pendingPressRef.current = null;
         setGlobalDragLock(true);
         setDragging(true);
+
+        const dy = startRef.current.y - e.clientY;
+        const next = clamp01(startRef.current.v + dy / DRAG_PIXELS_FOR_FULL_SWEEP);
+
+        setDisplayValue(next);
+        onChange?.(next);
+        return;
       }
     }
 

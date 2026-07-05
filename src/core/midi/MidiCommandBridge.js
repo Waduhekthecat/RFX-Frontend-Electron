@@ -358,6 +358,11 @@ export class MidiCommandBridge {
             return;
         }
 
+            if (control === MIDI_CONTROLS.FS_B) {
+            this.dispatchCommand({ name: "toggleTunerMasterSend" });
+            return;
+        }
+
         if (control === MIDI_GESTURES.FS_B_LONG) {
             console.log("[MIDI] FS_B long not assigned yet");
             return;

@@ -673,6 +673,38 @@ local function set_record_output_stereo(track, armed)
   return true
 end
 
+local function set_track_main_send_enabled(track, enabled)
+  if not track then return false end
+
+  reaper.SetMediaTrackInfo_Value(track, "B_MAINSEND", enabled and 1 or 0)
+  return true
+end
+
+local function get_track_main_send_enabled(track)
+  if not track then return false end
+
+  local value = reaper.GetMediaTrackInfo_Value(track, "B_MAINSEND")
+  return value ~= nil and value ~= 0
+end
+
+local function apply_tuner_record_state()
+  local inputTrack = find_track_by_name("INPUT")
+  local tuneTrack = find_track_by_name("RFX_TUNE")
+
+  if inputTrack then
+    set_record_arm_no_input_monitor(inputTrack, false)
+  end
+
+  if tuneTrack then
+    reaper.SetMediaTrackInfo_Value(tuneTrack, "I_RECMODE", 1)
+    reaper.SetMediaTrackInfo_Value(tuneTrack, "I_RECARM", 1)
+    reaper.SetMediaTrackInfo_Value(tuneTrack, "I_RECMON", 0)
+    set_track_main_send_enabled(tuneTrack, false)
+  end
+
+  return true
+end
+
 local function apply_looper_record_arm(looperType)
   
   local lpPre = find_track_by_name("LP_PRE")
@@ -1497,6 +1529,37 @@ local function exec_setCountInEnabled(payload)
   }
 end
 
+local function exec_toggle_tuner_master_send(_payload)
+  local tuneTrack = find_track_by_name("RFX_TUNE")
+  if not tuneTrack then
+    return false, "RFX_TUNE track not found"
+  end
+
+  local enabled = get_track_main_send_enabled(tuneTrack)
+  local ok = set_track_main_send_enabled(tuneTrack, not enabled)
+  if not ok then
+    return false, "failed to toggle RFX_TUNE main send"
+  end
+
+  return true, nil, {
+    enabled = not enabled,
+    muted = not (not enabled),
+  }
+end
+
+local function exec_get_tuner_master_send_state(_payload)
+  local tuneTrack = find_track_by_name("RFX_TUNE")
+  if not tuneTrack then
+    return false, "RFX_TUNE track not found"
+  end
+
+  local enabled = get_track_main_send_enabled(tuneTrack)
+  return true, nil, {
+    enabled = enabled,
+    muted = not enabled,
+  }
+end
+
 local function exec_setMode(modeName, payload)
   local mode = normalize_app_mode(modeName)
   if not mode then
@@ -1514,6 +1577,13 @@ local function exec_setMode(modeName, payload)
     if not okRouting then
       return false, "mode saved but routing apply failed: " .. tostring(routingErr or "")
     end
+
+  if mode == "tuner" then
+    local okTunerRecord, tunerRecordErr = apply_tuner_record_state()
+    if not okTunerRecord then
+      return false, "mode saved but tuner record apply failed: " .. tostring(tunerRecordErr or "")
+    end
+  end
 
   local payloadStr = "{}"
   local okEncode, encoded = pcall(json.encode, payload or {})
@@ -1577,6 +1647,10 @@ local function execute_command(cmd)
     return exec_setMode("automation", payload)
   elseif name == "setTunerMode" then
     return exec_setMode("tuner", payload)
+  elseif name == "toggleTunerMasterSend" then
+    return exec_toggle_tuner_master_send(payload)
+  elseif name == "getTunerMasterSendState" then
+    return exec_get_tuner_master_send_state(payload)
 
   elseif name == "startLooperRecord" then
     return looper.start_record(payload)

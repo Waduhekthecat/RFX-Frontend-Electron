@@ -343,14 +343,42 @@ async function trySendTrackPanOsc(transport, trackGuid, value) {
   throw new Error("transport osc.sendTrackPan not wired");
 }
 
-async function trySendFxParamValueOsc(transport, payload) {
+function makeReaperFxParamOscPacket(state, payload) {
+  const trackGuid = String(payload.trackGuid || "");
+  const trackIndex0 = state.entities.trackOrder.indexOf(trackGuid);
+
+  const fxIndex0 = Number(payload.fxIndex);
+  const paramIndex0 = Number(payload.paramIdx);
+  const value01 = clamp01(payload.value01 ?? payload.value);
+
+  if (trackIndex0 < 0) throw new Error(`OSC track not found: ${trackGuid}`);
+  if (!Number.isFinite(fxIndex0)) throw new Error("OSC missing fxIndex");
+  if (!Number.isFinite(paramIndex0)) throw new Error("OSC missing paramIdx");
+
+  return {
+    address: `/track/${trackIndex0 + 1}/fx/${fxIndex0 + 1}/fxparam/${paramIndex0 + 1}/value`,
+    args: [value01],
+  };
+}
+
+async function trySendFxParamValueOsc(transport, payload, state) {
+  const packet = makeReaperFxParamOscPacket(state, payload);
+
+  console.log("[OSC SEND]", packet);
+
+  if (transport?.sendOsc) {
+    return transport.sendOsc(packet);
+  }
+
   if (transport?.osc?.sendFxParamValue) {
     return transport.osc.sendFxParamValue(payload);
   }
+
   if (transport?.sendFxParamValueOsc) {
     return transport.sendFxParamValueOsc(payload);
   }
-  throw new Error("transport osc.sendFxParamValue not wired");
+
+  throw new Error("transport OSC not wired");
 }
 
 function getKnobTargets(mapForBus, knobId) {
@@ -492,6 +520,7 @@ export const useRfxStore = create((set, get) => ({
     activeTrackGuid: null,
     selectedTrackGuid: null,
     selectedFxGuid: null,
+    tunerMuted: true,
     looperType: DEFAULT_LOOPER_TYPE,
     looper: { ...DEFAULT_LOOPER_STATE },
     tempoBpm: DEFAULT_SESSION_TEMPO_BPM,
@@ -640,8 +669,8 @@ export const useRfxStore = create((set, get) => ({
           ...(s.automation || {}),
           armedAutomationParameters: isArmed
             ? armedAutomationParameters.filter(
-                (entry) => !sameAutomatableParameter(entry, parameter)
-              )
+              (entry) => !sameAutomatableParameter(entry, parameter)
+            )
             : [...armedAutomationParameters, parameter],
         },
       };
@@ -777,6 +806,31 @@ export const useRfxStore = create((set, get) => ({
     get().logEvent("session:time_signature_updated", {
       beatsPerMeasure: nextBeatsPerMeasure,
       noteLength: nextNoteLength,
+    });
+  },
+
+  setTunerMuted: (muted) => {
+    const nextMuted = !!muted;
+    set((s) => ({
+      session: {
+        ...s.session,
+        tunerMuted: nextMuted,
+      },
+    }));
+    get().logEvent("tuner:mute_state_updated", {
+      tunerMuted: nextMuted,
+    });
+  },
+
+  toggleTunerMuted: () => {
+    set((s) => ({
+      session: {
+        ...s.session,
+        tunerMuted: !s.session?.tunerMuted,
+      },
+    }));
+    get().logEvent("tuner:mute_toggled", {
+      tunerMuted: !get().session?.tunerMuted,
     });
   },
 
@@ -1201,13 +1255,17 @@ export const useRfxStore = create((set, get) => ({
       }
 
       try {
-        await trySendFxParamValueOsc(transport, {
-          trackGuid,
-          fxGuid,
-          fxIndex,
-          paramIdx,
-          value01,
-        });
+        await trySendFxParamValueOsc(
+          transport,
+          {
+            trackGuid,
+            fxGuid,
+            fxIndex,
+            paramIdx,
+            value01,
+          },
+          get()
+        );
 
         get().logEvent(
           "osc:fxParam:preview",

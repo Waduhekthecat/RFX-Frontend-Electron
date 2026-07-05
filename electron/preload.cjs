@@ -47,6 +47,12 @@ contextBridge.exposeInMainWorld("rfx", {
       return () => ipcRenderer.removeListener("rfx:reaperReady", handler);
     },
 
+    onTunerData: (cb) => {
+      const handler = (_evt, payload) => cb(payload);
+      ipcRenderer.on("rfx:tuner", handler);
+      return () => ipcRenderer.removeListener("rfx:tuner", handler);
+    },
+
     onMidiMessage: (cb) => {
       const handler = (_evt, midiEvent) => cb(midiEvent);
       ipcRenderer.on("midi:message", handler);
