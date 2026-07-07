@@ -698,6 +698,9 @@ function opVerifySnapshot(op, norm) {
     case "syncView":
       return v(true, "syncView (no state assertion)");
 
+    case "exitTunerMode":
+      return v(true, "exitTunerMode (no state assertion)");
+
     default:
       return v(false, `no verifier implemented for op kind="${kind}"`);
   }

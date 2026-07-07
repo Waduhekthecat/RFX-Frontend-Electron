@@ -120,7 +120,7 @@ function PluginCard({
   onRemove,
   onParams,
 }) {
-  const subtitle = [fx.vendor, fx.format].filter(Boolean).join(" • ") || "Unknown";
+  const subtitle = [fx.vendor, fx.format].filter(Boolean).join(" • ") || "";
 
   return (
     <div
@@ -209,7 +209,7 @@ function TrackDetailCard({ trackGuid, intent }) {
       out.push({
         id: fxGuid,
         name: String(fx.name || "Plugin"),
-        vendor: String(fx.vendor || "").trim() || "Unknown",
+        vendor: String(fx.vendor || "").trim() || "",
         format: String(fx.format || "").trim() || "",
         enabled: fx.enabled !== false,
       });

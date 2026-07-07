@@ -6,24 +6,31 @@ import {
 } from "../rfx/Store.js";
 
 export function MidiRuntime() {
-    const dispatchIntent = useRfxStore((s) => s.dispatchIntent);
+  const dispatchIntent = useRfxStore((s) => s.dispatchIntent);
 
-    useEffect(() => {
-        const midi = initMidi({
-      dispatchIntent: (intent) => {
-        const nextIntent =
-          intent?.name === "setLooperMode"
-            ? {
-                ...intent,
-                looperType:
-                  useRfxStore.getState().session?.looperType ??
-                  DEFAULT_LOOPER_TYPE,
-              }
-            : intent;
+  useEffect(() => {
+    const sendIntent = (intent) => {
+      const nextIntent =
+        intent?.name === "setLooperMode"
+          ? {
+              ...intent,
+              looperType:
+                useRfxStore.getState().session?.looperType ??
+                DEFAULT_LOOPER_TYPE,
+            }
+          : intent;
 
-        return dispatchIntent(nextIntent);
-      },
+      return dispatchIntent(nextIntent);
+    };
+
+    const midi = initMidi({
+      dispatchIntent: sendIntent,
       dispatchCommand: (command, payload = {}) => {
+        if (command && typeof command === "object" && command.name) {
+          console.log("[MIDI → RFX INTENT]", command);
+          return sendIntent(command);
+        }
+
         console.log("[MIDI → RFX COMMAND]", command, payload);
 
         window.dispatchEvent(
@@ -34,10 +41,10 @@ export function MidiRuntime() {
       },
     });
 
-        return () => {
-            midi?.dispose?.();
-        };
-    }, [dispatchIntent]);
+    return () => {
+      midi?.dispose?.();
+    };
+  }, [dispatchIntent]);
 
-    return null;
+  return null;
 }

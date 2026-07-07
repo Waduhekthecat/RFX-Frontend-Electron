@@ -3,6 +3,7 @@ local exporter = dofile(reaper.GetResourcePath() .. "/Scripts/reascripts/RFX_Exp
 local installedExporter = dofile(reaper.GetResourcePath() .. "/Scripts/reascripts/RFX_ExportPluginList.lua")
 local router = dofile(reaper.GetResourcePath() .. "/Scripts/reascripts/RFX_Router.lua")
 local looper = dofile(reaper.GetResourcePath() .. "/Scripts/reascripts/RFX_LooperCmds.lua")
+local pitchShift = dofile(reaper.GetResourcePath() .. "/Scripts/reascripts/RFX_TogglePitchShift+1.lua")
 
 local function get_ipc_dir()
   return "/tmp/rfx-ipc"
@@ -46,14 +47,104 @@ local function write_json(path, obj)
   return write_file(path, encoded)
 end
 
-local function reaper_log(target, name, _payload)
+local current_reaper_steps = nil
+
+local function payload_to_log_string(payload)
+  if type(payload) ~= "table" then
+    return "{}"
+  end
+
+  local hasAny = false
+  for _k, _v in pairs(payload) do
+    hasAny = true
+    break
+  end
+
+  if not hasAny then
+    return "{}"
+  end
+
+  local ok, encoded = pcall(json.encode, payload)
+  if ok and encoded then
+    return tostring(encoded)
+  end
+
+  return "{}"
+end
+
+local function append_reaper_step(step)
+  step = tostring(step or "")
+  if step == "" then return end
+
+  if not current_reaper_steps then
+    current_reaper_steps = {}
+  end
+
+  -- Avoid repeated internal calls making noisy logs like writeState, writeState.
+  for i = 1, #current_reaper_steps do
+    if current_reaper_steps[i] == step then
+      return
+    end
+  end
+
+  current_reaper_steps[#current_reaper_steps + 1] = step
+end
+
+local function flush_reaper_log()
+  if not current_reaper_steps or #current_reaper_steps == 0 then
+    current_reaper_steps = nil
+    return
+  end
+
   reaper.ShowConsoleMsg(
-    "[REAPER -> " ..
-    tostring(target or "") ..
-    "] " ..
+    "[REAPER]: " ..
+    table.concat(current_reaper_steps, ", ") ..
+    "\n\n"
+  )
+
+  current_reaper_steps = nil
+end
+
+local function log_cmd(name, payload)
+  current_reaper_steps = {}
+
+  reaper.ShowConsoleMsg(
+    "[CMD]: " ..
     tostring(name or "") ..
+    payload_to_log_string(payload) ..
     "\n"
   )
+end
+
+local function reaper_log(target, name, payload)
+  target = tostring(target or "")
+  name = tostring(name or "")
+
+  if target == "cmd" then
+    log_cmd(name, payload)
+    return
+  end
+
+  if target == "state" then
+    if name == "writeState" then
+      append_reaper_step("writeState")
+    else
+      append_reaper_step(name)
+    end
+    return
+  end
+
+  if target == "res" then
+    append_reaper_step("resolveCmd")
+    return
+  end
+
+  if target == "vm" then
+    append_reaper_step("exportVm")
+    return
+  end
+
+  append_reaper_step(name)
 end
 
 local function read_json(path)
@@ -99,7 +190,6 @@ end
 
 local lastTickLog = 0
 local pending_vm_export = false
-
 
 -- ============================================================
 -- RFX TUNER GMEM BRIDGE
@@ -307,33 +397,23 @@ local function poll_tuner_bridge(state)
   local t = now_ms()
 
   local eventChanged = tuner.eventCount ~= lastTunerEventCount
-  local dueRefresh = (t - lastTunerWriteMs) >= 100
 
-  -- Do not spam the console, JSON file, or OSC bridge on every defer tick.
-  -- This keeps output live but capped to roughly 30 FPS.
-  if (not eventChanged and not dueRefresh) or (t - lastTunerWriteMs) < 33 then
+  -- Only publish fresh tuner events. Re-sending by timer repeats stale pitch.
+  if not eventChanged or (t - lastTunerWriteMs) < 33 then
     return true
   end
 
-  if eventChanged then
-    if tuner.hasPitch then
-      reaper.ShowConsoleMsg(
-        string.format(
-          "[RFX TUNER] %s%d  %+0.1f¢\n",
-          tuner.note,
-          tuner.octave,
-          tuner.cents
-        )
+  if tuner.hasPitch then
+    reaper.ShowConsoleMsg(
+      string.format(
+        "[RFX TUNER] %s%d  %+0.1f¢\n",
+        tuner.note,
+        tuner.octave,
+        tuner.cents
       )
-    else
-      reaper.ShowConsoleMsg("[RFX TUNER] --\n")
-    end
-  end
-
-  if not tuner.hasPitch then
-    lastTunerEventCount = tuner.eventCount
-    lastTunerWriteMs = t
-    return true
+    )
+  else
+    reaper.ShowConsoleMsg("[RFX TUNER] --\n")
   end
 
   lastTunerEventCount = tuner.eventCount
@@ -411,6 +491,7 @@ local function default_state()
     tempoBpm = 120,
     clickEnabled = false,
     countInEnabled = false,
+    pitch = 0,
     busModes = {
       FX_1 = "linear",
       FX_2 = "linear",
@@ -494,6 +575,7 @@ local function read_state()
   state.tempoBpm = clamp_tempo_bpm(state.tempoBpm) or 120
   state.clickEnabled = state.clickEnabled == true
   state.countInEnabled = state.countInEnabled == true
+  state.pitch = tonumber(state.pitch) == 1 and 1 or 0
   state.busModes.FX_1 = normalize_mode(state.busModes.FX_1) or "linear"
   state.busModes.FX_2 = normalize_mode(state.busModes.FX_2) or "linear"
   state.busModes.FX_3 = normalize_mode(state.busModes.FX_3) or "linear"
@@ -642,6 +724,17 @@ local function set_record_arm_no_input_monitor(track, enabled)
   return true
 end
 
+local function set_record_arm_mono_input(track, inputIndex0, enabled)
+  if not track then return false end
+
+  reaper.SetMediaTrackInfo_Value(track, "I_RECARM", enabled and 1 or 0)
+  reaper.SetMediaTrackInfo_Value(track, "I_RECMON", enabled and 1 or 0)
+  reaper.SetMediaTrackInfo_Value(track, "I_RECINPUT", inputIndex0)
+  reaper.SetMediaTrackInfo_Value(track, "I_RECMODE", 2) -- record disabled / monitor only
+
+  return true
+end
+
 local function apply_active_bus_monitoring(previousBusId, nextBusId)
   previousBusId = normalize_bus_id(previousBusId)
   nextBusId = normalize_bus_id(nextBusId)
@@ -687,17 +780,16 @@ local function get_track_main_send_enabled(track)
   return value ~= nil and value ~= 0
 end
 
-local function apply_tuner_record_state()
+local function apply_default_record_state()
   local inputTrack = find_track_by_name("INPUT")
   local tuneTrack = find_track_by_name("RFX_TUNE")
 
   if inputTrack then
-    set_record_arm_no_input_monitor(inputTrack, false)
+    set_record_arm_mono_input(inputTrack, 1, true) -- mono input 2
   end
 
   if tuneTrack then
-    reaper.SetMediaTrackInfo_Value(tuneTrack, "I_RECMODE", 1)
-    reaper.SetMediaTrackInfo_Value(tuneTrack, "I_RECARM", 1)
+    set_record_output_stereo(tuneTrack, false)
     reaper.SetMediaTrackInfo_Value(tuneTrack, "I_RECMON", 0)
     set_track_main_send_enabled(tuneTrack, false)
   end
@@ -1560,6 +1652,42 @@ local function exec_get_tuner_master_send_state(_payload)
   }
 end
 
+local function exec_exit_tuner_mode(_payload)
+  local okDefaultRecord, defaultRecordErr = apply_default_record_state()
+  if not okDefaultRecord then
+    return false, "exit tuner record apply failed: " .. tostring(defaultRecordErr or "")
+  end
+
+  return true
+end
+
+local function exec_togglePitchShift(_payload)
+  local state = read_state()
+
+  -- RFX UI state: default/unshifted = 0, shifted = +1.
+  local nextPitch = state.pitch == 1 and 0 or 1
+  state.pitch = nextPitch
+
+  if not write_state(state) then
+    return false, "failed to write state.json"
+  end
+
+  local okPitch, pitchErr, pitchExtra = pitchShift.toggle()
+
+  if not okPitch then
+    return false, "state saved but pitch shift toggle failed: " .. tostring(pitchErr or "")
+  end
+
+  request_vm_export("togglePitchShift")
+
+  return true, nil, {
+    pitch = nextPitch,
+    enabled = pitchExtra and pitchExtra.enabled,
+    trackName = pitchExtra and pitchExtra.trackName,
+    fxIndex = pitchExtra and pitchExtra.fxIndex,
+  }
+end
+
 local function exec_setMode(modeName, payload)
   local mode = normalize_app_mode(modeName)
   if not mode then
@@ -1573,15 +1701,18 @@ local function exec_setMode(modeName, payload)
     return false, "failed to write state.json"
   end
   
-  local okRouting, routingErr = apply_routing_for_app_mode(state)
+  local okRouting, routingErr = true, nil
+  if mode ~= "tuner" then
+    okRouting, routingErr = apply_routing_for_app_mode(state)
+  end
     if not okRouting then
       return false, "mode saved but routing apply failed: " .. tostring(routingErr or "")
     end
 
-  if mode == "tuner" then
-    local okTunerRecord, tunerRecordErr = apply_tuner_record_state()
-    if not okTunerRecord then
-      return false, "mode saved but tuner record apply failed: " .. tostring(tunerRecordErr or "")
+  if mode == "perform" or mode == "edit" or mode == "looper" or mode == "automation" or mode == "tuner" then
+    local okDefaultRecord, defaultRecordErr = apply_default_record_state()
+    if not okDefaultRecord then
+      return false, "mode saved but default record apply failed: " .. tostring(defaultRecordErr or "")
     end
   end
 
@@ -1620,6 +1751,8 @@ local function execute_command(cmd)
     return exec_removeFx(payload)
   elseif name == "toggleFx" then
     return exec_toggleFx(payload)
+  elseif name == "togglePitchShift" then
+    return exec_togglePitchShift(payload)
   elseif name == "reorderFx" then
     return exec_reorderFx(payload)
   elseif name == "getPluginParams" then
@@ -1647,6 +1780,8 @@ local function execute_command(cmd)
     return exec_setMode("automation", payload)
   elseif name == "setTunerMode" then
     return exec_setMode("tuner", payload)
+  elseif name == "exitTunerMode" then
+    return exec_exit_tuner_mode(payload)
   elseif name == "toggleTunerMasterSend" then
     return exec_toggle_tuner_master_send(payload)
   elseif name == "getTunerMasterSendState" then
@@ -1686,6 +1821,33 @@ local function execute_command(cmd)
   return false, "unknown command: " .. name
 end
 
+local function export_pending_vm(reason)
+  if not pending_vm_export then
+    return true
+  end
+
+  pending_vm_export = false
+
+  local okVm = exporter.export_vm()
+  if okVm then
+    log_debug("export_vm() success reason=" .. tostring(reason or "deferred"))
+    reaper_log("vm", "exportVm", {
+      ok = true,
+      reason = tostring(reason or "deferred"),
+      ts = now_ms(),
+    })
+    return true
+  end
+
+  log_error("export_vm() failed reason=" .. tostring(reason or "deferred"))
+  reaper_log("vm", "exportVm", {
+    ok = false,
+    reason = tostring(reason or "deferred"),
+    ts = now_ms(),
+  })
+  return false
+end
+
 local function process_once()
   local t = now_ms()
   if t - lastTickLog > 1000 then
@@ -1695,24 +1857,8 @@ local function process_once()
   end
 
   if pending_vm_export then
-    pending_vm_export = false
-
-    local okVm = exporter.export_vm()
-    if okVm then
-      log_debug("deferred export_vm() success")
-      reaper_log("vm", "exportVm", {
-        ok = true,
-        reason = "deferred",
-        ts = now_ms(),
-      })
-    else
-      log_error("deferred export_vm() failed")
-      reaper_log("vm", "exportVm", {
-        ok = false,
-        reason = "deferred",
-        ts = now_ms(),
-      })
-    end
+    export_pending_vm("deferred")
+    flush_reaper_log()
   end
 
   local stateForTuner = read_state()
@@ -1751,6 +1897,13 @@ local function process_once()
         write_result(cmd.id, cmd.name, false, "runtime error: " .. tostring(okFlag))
         log_error("Runtime error while executing command: " .. tostring(okFlag))
       end
+
+      -- If the command requested a VM export, do it now so the console log
+      -- stays grouped as one command transaction:
+      --   [CMD]: name{payload}
+      --   [REAPER]: writeState, resolveCmd, exportVm
+      export_pending_vm("command:" .. tostring(cmdName))
+      flush_reaper_log()
 
       delete_file(cmdPath)
     end
@@ -1791,6 +1944,8 @@ do
       ts = now_ms(),
     })
   end
+
+  flush_reaper_log()
 end
 
 do

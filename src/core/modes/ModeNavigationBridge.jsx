@@ -2,6 +2,7 @@ import React from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { modeManager } from "./ModeManager.js";
 import { RFX_MODES } from "./Modes.js";
+import { DEFAULT_LOOPER_TYPE, useRfxStore } from "../rfx/Store.js";
 
 const ROUTE_BY_MODE = Object.freeze({
   [RFX_MODES.PERFORM]: "/",
@@ -24,6 +25,27 @@ export function ModeNavigationBridge() {
   const navigate = useNavigate();
   const location = useLocation();
   const initializedFromRoute = React.useRef(false);
+  const dispatchIntent = useRfxStore((state) => state.dispatchIntent);
+
+  React.useEffect(() => {
+    modeManager.setDispatchIntent((intent) => {
+      const nextIntent =
+        intent?.name === "setLooperMode"
+          ? {
+              ...intent,
+              looperType:
+                useRfxStore.getState().session?.looperType ??
+                DEFAULT_LOOPER_TYPE,
+            }
+          : intent;
+
+      return dispatchIntent(nextIntent);
+    });
+
+    return () => {
+      modeManager.setDispatchIntent(null);
+    };
+  }, [dispatchIntent]);
 
   React.useEffect(() => {
     const unsubscribe = modeManager.subscribe((event) => {

@@ -126,6 +126,32 @@ export function SystemView() {
     }, 0);
   }
 
+async function handleTestOscTrack1Volume() {
+    const value = "-5"; // Send as a string for the /str endpoint
+    const packet = {
+      address: "/track/1/volume/str",
+      args: [
+        {
+          type: "s", // 's' stands for string type
+          value: value
+        }
+      ]
+    };
+    
+    // Your code to send the packet via UDP goes here
+
+
+    try {
+      console.log("[OSC TEST] Sending", packet);
+
+      const result = await window.rfx.transport.sendOsc(packet);
+
+      console.log("[OSC TEST] Result", result);
+    } catch (err) {
+      console.error("[OSC TEST] Failed", err);
+    }
+  }
+
   return (
     <div className={styles.wrap}>
       <div
@@ -337,6 +363,15 @@ export function SystemView() {
                     onClick={() => console.log("[System] export diagnostics")}
                   >
                     Export
+                  </Btn>
+                }
+              />
+              <SystemItemRow
+                title="Test OSC Track 1 Volume"
+                desc='Sends /track/1/volume with value 0.2 directly through window.rfx.transport.sendOsc'
+                right={
+                  <Btn onClick={handleTestOscTrack1Volume}>
+                    Send
                   </Btn>
                 }
               />

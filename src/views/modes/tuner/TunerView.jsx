@@ -70,10 +70,17 @@ export function TunerView() {
     const [tunerState, setTunerState] = React.useState(null);
     const tunerMuted = useRfxStore((state) => state.session?.tunerMuted ?? true);
     const setTunerMuted = useRfxStore((state) => state.setTunerMuted);
+    const dispatchIntent = useRfxStore((state) => state.dispatchIntent);
 
-    const exitTunerMode = React.useCallback(() => {
+    const exitTunerMode = React.useCallback(async () => {
+        try {
+            await dispatchIntent({ name: "exitTunerMode" });
+        } catch (error) {
+            console.warn("[TUNER] failed to dispatch exitTunerMode", error);
+        }
+
         modeManager.setMode(RFX_MODES.PERFORM, { source: "ui" });
-    }, []);
+    }, [dispatchIntent]);
 
     const refreshTunerMuteState = React.useCallback(async () => {
         const api = window.rfx?.transport;
@@ -107,7 +114,7 @@ export function TunerView() {
 
     const handleTunerControl = React.useCallback((control) => {
         if (control === MIDI_CONTROLS.FS_A_LONG) {
-            exitTunerMode();
+            void exitTunerMode();
             return;
         }
 

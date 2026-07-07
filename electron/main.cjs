@@ -75,13 +75,14 @@ function ensureOscPort() {
     localAddress: "127.0.0.1",
     localPort: 0,
     remoteAddress: "127.0.0.1",
-    remotePort: 8000,
+    remotePort: 55001,
     metadata: true,
   });
 
   oscPort.open();
   return oscPort;
 }
+
 
 function getCurrentAppMode() {
   try {
@@ -97,13 +98,12 @@ function getCurrentAppMode() {
     return "perform";
   }
 }
-
 function ensureOscListener() {
   if (oscListenerSocket) return oscListenerSocket;
 
   oscListenerSocket = dgram.createSocket("udp4");
 
-  oscListenerSocket.on("message", (buffer, rinfo) => {
+  oscListenerSocket.on("message", (buffer) => {
     try {
       const mode = getCurrentAppMode();
       if (mode !== "tuner") {
@@ -111,6 +111,7 @@ function ensureOscListener() {
       }
 
       const messages = parseOscMessages(buffer);
+
       for (const message of messages) {
         if (message.address !== "/rfx/tuner") {
           continue;
@@ -126,26 +127,31 @@ function ensureOscListener() {
             octave: null,
             cents: null,
           });
+
           console.log("[RFX OSC] --");
           continue;
         }
 
         const noteText = String(note ?? "?").trim() || "?";
-        const octaveText = Number.isFinite(Number(octave)) ? String(Number(octave)) : "";
+        const octaveValue = Number(octave);
+        const octaveText = Number.isFinite(octaveValue) ? String(octaveValue) : "";
         const centsValue = Number(cents);
-        const centsText = `${Number.isFinite(centsValue) && centsValue >= 0 ? "+" : ""}${Number.isFinite(centsValue) ? centsValue.toFixed(1) : "0.0"}¢`;
+
+        const centsText = `${
+          Number.isFinite(centsValue) && centsValue >= 0 ? "+" : ""
+        }${Number.isFinite(centsValue) ? centsValue.toFixed(1) : "0.0"}¢`;
 
         safeSend("rfx:tuner", {
           hasPitch: 1,
           note: noteText,
-          octave: Number.isFinite(Number(octave)) ? Number(octave) : null,
+          octave: Number.isFinite(octaveValue) ? octaveValue : null,
           cents: Number.isFinite(centsValue) ? centsValue : null,
         });
 
         console.log(`[RFX OSC] ${noteText}${octaveText}  ${centsText}`);
       }
     } catch (error) {
-      // Ignore malformed or non-message OSC packets from REAPER.
+      // Ignore malformed or non-message OSC packets.
     }
   });
 
@@ -153,8 +159,8 @@ function ensureOscListener() {
     console.error("[RFX OSC] listener error", error);
   });
 
-  oscListenerSocket.bind(19090, "0.0.0.0", () => {
-    console.log("[RFX OSC] listening on udp://0.0.0.0:19090");
+  oscListenerSocket.bind(55000, "0.0.0.0", () => {
+    console.log("[RFX OSC] listening on udp://0.0.0.0:55000");
   });
 
   return oscListenerSocket;
@@ -183,12 +189,13 @@ function parseOscMessages(buffer) {
 
   if (address === "#bundle") {
     const messages = [];
+
+    // Skip OSC timetag: 8 bytes
     offset += 8;
 
-    while (offset < buffer.length) {
-      const sizeInfo = readPaddedString(buffer, offset);
-      const size = Number(sizeInfo.value || 0);
-      offset = sizeInfo.nextOffset;
+    while (offset + 4 <= buffer.length) {
+      const size = buffer.readUInt32BE(offset);
+      offset += 4;
 
       if (!Number.isFinite(size) || size <= 0 || offset + size > buffer.length) {
         break;
@@ -196,6 +203,7 @@ function parseOscMessages(buffer) {
 
       const nested = buffer.subarray(offset, offset + size);
       offset += size;
+
       messages.push(...parseOscMessages(nested));
     }
 
@@ -211,6 +219,7 @@ function parseOscMessages(buffer) {
   }
 
   const args = [];
+
   for (let i = 1; i < typeTag.length; i += 1) {
     const tag = typeTag[i];
 
@@ -221,24 +230,31 @@ function parseOscMessages(buffer) {
         offset = stringInfo.nextOffset;
         break;
       }
+
       case "i": {
+        if (offset + 4 > buffer.length) return [];
         const value = buffer.readInt32BE(offset);
         args.push(value);
         offset += 4;
         break;
       }
+
       case "f": {
+        if (offset + 4 > buffer.length) return [];
         const value = buffer.readFloatBE(offset);
         args.push(value);
         offset += 4;
         break;
       }
+
       case "T":
         args.push(true);
         break;
+
       case "F":
         args.push(false);
         break;
+
       default:
         args.push(null);
         break;
@@ -322,7 +338,7 @@ function evaluateReaperReadiness(vm, source = "unknown") {
 async function removeFileIfExists(filePath) {
   try {
     await fsp.rm(filePath, { force: true });
-  } catch {}
+  } catch { }
 }
 
 async function clearRuntimeIpcArtifacts() {
@@ -539,8 +555,8 @@ async function bootIpc() {
   });
 
   await watchers.start();
-  await watchers.refreshVm().catch(() => {});
-  await watchers.refreshCmdResult().catch(() => {});
+  await watchers.refreshVm().catch(() => { });
+  await watchers.refreshCmdResult().catch(() => { });
 
   liveInstalledFx = await readInstalledFxSnapshot().catch(() => []);
 
@@ -600,9 +616,9 @@ app.on("window-all-closed", () => {
 app.on("before-quit", async () => {
   stopReadinessPolling();
 
-  try { closeMidiMain(); } catch {}
-  try { watchers?.stop(); } catch {}
-  try { oscPort?.close(); } catch {}
-  try { oscListenerSocket?.close(); } catch {}
-  try { await clearRuntimeIpcArtifacts(); } catch {}
+  try { closeMidiMain(); } catch { }
+  try { watchers?.stop(); } catch { }
+  try { oscPort?.close(); } catch { }
+  try { oscListenerSocket?.close(); } catch { }
+  try { await clearRuntimeIpcArtifacts(); } catch { }
 });

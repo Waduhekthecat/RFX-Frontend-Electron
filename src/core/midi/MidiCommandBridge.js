@@ -28,12 +28,26 @@ const PHYSICAL_TO_LONG_GESTURE_CONTROL = {
     [MIDI_CONTROLS.FS_D]: MIDI_GESTURES.FS_D_LONG,
 };
 
+const PERFORM_PHYSICAL_TO_LONG_GESTURE_CONTROL = {
+    [MIDI_CONTROLS.FS_A]: MIDI_GESTURES.FS_A_LONG,
+    [MIDI_CONTROLS.FS_B]: MIDI_GESTURES.FS_B_LONG,
+    [MIDI_CONTROLS.FS_C]: MIDI_GESTURES.FS_C_LONG,
+    [MIDI_CONTROLS.FS_D]: MIDI_GESTURES.FS_D_LONG,
+};
+
+const RELEASE_CONTROLS = new Set([
+    MIDI_CONTROLS.FS_A_RELEASE,
+    MIDI_CONTROLS.FS_B_RELEASE,
+    MIDI_CONTROLS.FS_C_RELEASE,
+    MIDI_CONTROLS.FS_D_RELEASE,
+]);
+
 export class MidiCommandBridge {
     constructor({ modeManager, dispatchCommand }) {
         this.modeManager = modeManager;
         this.dispatchCommand = dispatchCommand;
         this.pressStateByControl = new Map();
-        this.ignoreNextReleaseAfterModeSwitch = false;
+        this.ignoreNextFootswitchRelease = false;
     }
 
     handleMappedControl(mappedEvent) {
@@ -49,12 +63,14 @@ export class MidiCommandBridge {
             mappedEvent.eventType === MIDI_EVENT_TYPES.RELEASE &&
             RELEASE_CONTROLS.has(mappedEvent.control)
         ) {
-            if (this.ignoreNextReleaseAfterModeSwitch) {
-                this.ignoreNextReleaseAfterModeSwitch = false;
+            if (this.ignoreNextFootswitchRelease) {
+                this.ignoreNextFootswitchRelease = false;
+                this.clearPressState(releasePhysicalControl);
                 console.log(
-                    "[MIDI COMMAND BRIDGE] ignoring first release after mode switch",
+                    "[MIDI COMMAND BRIDGE] ignoring first footswitch release after long press",
                     {
                         control: mappedEvent.control,
+                        physicalControl: releasePhysicalControl,
                     }
                 );
                 return;
@@ -128,7 +144,10 @@ export class MidiCommandBridge {
 
     startGestureTracking(mappedEvent, modeAtPressStart) {
         const { control } = mappedEvent;
-        const longGestureControl = PHYSICAL_TO_LONG_GESTURE_CONTROL[control];
+        const longGestureControl =
+            modeAtPressStart === RFX_MODES.PERFORM
+                ? PERFORM_PHYSICAL_TO_LONG_GESTURE_CONTROL[control]
+                : PHYSICAL_TO_LONG_GESTURE_CONTROL[control];
 
         if (!longGestureControl) {
             this.dispatchToMode(modeAtPressStart, mappedEvent);
@@ -154,6 +173,7 @@ export class MidiCommandBridge {
             if (!currentState || currentState.longFired) return;
 
             currentState.longFired = true;
+            this.ignoreNextFootswitchRelease = true;
 
             console.log("[MIDI COMMAND BRIDGE] logical long fired", {
                 mode: currentState.modeAtPressStart,
@@ -226,6 +246,11 @@ export class MidiCommandBridge {
             control: physicalControl,
         });
 
+        if (state.modeAtPressStart === RFX_MODES.PERFORM) {
+            this.dispatchToMode(state.modeAtPressStart, mappedEvent);
+            return;
+        }
+
         this.dispatchToMode(state.modeAtPressStart, shortMappedEvent);
     }
 
@@ -240,8 +265,16 @@ export class MidiCommandBridge {
         this.pressStateByControl.delete(control);
     }
 
-    handlePerformMode({ control, eventType, normalizedValue }) {
+    handlePerformMode({ control, eventType, value, normalizedValue }) {
         if (eventType === MIDI_EVENT_TYPES.RELEASE) {
+            if (value !== 127) {
+                console.log("[MIDI] Perform release ignored:", {
+                    control,
+                    value,
+                });
+                return;
+            }
+
             switch (control) {
                 case MIDI_CONTROLS.FS_A_RELEASE:
                     this.dispatchCommand({
@@ -284,35 +317,18 @@ export class MidiCommandBridge {
 
         switch (control) {
             case MIDI_CONTROLS.FS_A:
-                this.dispatchCommand({
-                    name: "selectActiveBus",
-                    busId: "FX_1",
-                });
                 break;
 
             case MIDI_CONTROLS.FS_B:
-                this.dispatchCommand({
-                    name: "selectActiveBus",
-                    busId: "FX_2",
-                });
                 break;
 
             case MIDI_CONTROLS.FS_C:
-                this.dispatchCommand({
-                    name: "selectActiveBus",
-                    busId: "FX_3",
-                });
                 break;
 
             case MIDI_CONTROLS.FS_D:
-                this.dispatchCommand({
-                    name: "selectActiveBus",
-                    busId: "FX_4",
-                });
                 break;
 
             case MIDI_GESTURES.FS_A_LONG:
-                this.ignoreNextReleaseAfterModeSwitch = true;
                 this.modeManager.setMode(RFX_MODES.TUNER, { source: "midi" });
                 this.dispatchCommand("ENTER_TUNER_MODE", {
                     source: "midi",
@@ -321,11 +337,12 @@ export class MidiCommandBridge {
                 break;
 
             case MIDI_GESTURES.FS_B_LONG:
-                console.log("[MIDI] FS_B long not assigned yet");
+                this.dispatchCommand({
+                    name: "togglePitchShift",
+                });
                 break;
 
             case MIDI_GESTURES.FS_C_LONG:
-                this.ignoreNextReleaseAfterModeSwitch = true;
                 this.modeManager.setMode(RFX_MODES.AUTOMATION, { source: "midi" });
                 this.dispatchCommand("ENTER_AUTOMATION_MODE", {
                     source: "midi",
@@ -334,7 +351,6 @@ export class MidiCommandBridge {
                 break;
 
             case MIDI_GESTURES.FS_D_LONG:
-                this.ignoreNextReleaseAfterModeSwitch = true;
                 this.modeManager.setMode(RFX_MODES.LOOPER, { source: "midi" });
                 this.dispatchCommand("ENTER_LOOPER_MODE", {
                     source: "midi",
@@ -349,7 +365,6 @@ export class MidiCommandBridge {
 
     handleTunerMode({ control }) {
         if (control === MIDI_GESTURES.FS_A_LONG) {
-            this.ignoreNextReleaseAfterModeSwitch = true;
             this.modeManager.setMode(RFX_MODES.PERFORM, { source: "midi" });
             this.dispatchCommand("EXIT_TUNER_MODE", {
                 source: "midi",
@@ -378,7 +393,6 @@ export class MidiCommandBridge {
         }
 
         if (control === MIDI_GESTURES.FS_D_LONG) {
-            this.ignoreNextReleaseAfterModeSwitch = true;
             this.modeManager.setMode(RFX_MODES.PERFORM, { source: "midi" });
             this.dispatchCommand("EXIT_LOOPER_MODE", {
                 source: "midi",
@@ -432,7 +446,6 @@ export class MidiCommandBridge {
                 break;
 
             case MIDI_GESTURES.FS_C_LONG:
-                this.ignoreNextReleaseAfterModeSwitch = true;
                 this.modeManager.setMode(RFX_MODES.PERFORM, { source: "midi" });
                 this.dispatchCommand("EXIT_AUTOMATION_MODE", {
                     source: "midi",

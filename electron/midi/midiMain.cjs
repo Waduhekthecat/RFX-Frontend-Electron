@@ -3,6 +3,18 @@
 let midi = null;
 let input = null;
 
+const CC_LABELS = {
+  11: "FS_A",
+  12: "FS_B",
+  13: "FS_C",
+  14: "FS_D",
+  101: "FS_A_RELEASE",
+  102: "FS_B_RELEASE",
+  103: "FS_C_RELEASE",
+  104: "FS_D_RELEASE",
+  10: "EXPR",
+};
+
 function initMidiMain(mainWindow) {
   try {
     midi = require("midi");
@@ -31,6 +43,8 @@ function initMidiMain(mainWindow) {
     });
 
     if (!event) return;
+
+    logMidiInput(event);
 
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send("midi:message", event);
@@ -95,6 +109,28 @@ function normalizeMidiMessage(message, meta = {}) {
     message,
     ...meta,
   };
+}
+
+function logMidiInput(event) {
+  if (event.type === "cc") {
+    const label = CC_LABELS[event.cc] || `CC${event.cc}`;
+    console.log(`[MIDI INPUT] - ${label} (CC${event.cc} | ${event.value})`);
+    return;
+  }
+
+  if (event.type === "program-change") {
+    console.log(`[MIDI INPUT] - PROGRAM_CHANGE (${event.program})`);
+    return;
+  }
+
+  if (event.type === "note-on" || event.type === "note-off") {
+    console.log(
+      `[MIDI INPUT] - ${event.type.toUpperCase()} (${event.note} | ${event.velocity})`
+    );
+    return;
+  }
+
+  console.log("[MIDI INPUT] - UNKNOWN", event);
 }
 
 function closeMidiMain() {

@@ -110,6 +110,7 @@ function makePayload(call) {
     case "setEditMode":
     case "setAutomationMode":
     case "setTunerMode":
+    case "exitTunerMode":
       return {};
 
     case "setLooperMode":
