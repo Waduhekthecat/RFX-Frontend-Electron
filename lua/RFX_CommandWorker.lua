@@ -244,147 +244,6 @@ local function tuner_path()
   return get_ipc_dir() .. "/tuner.json"
 end
 
-
-local function tuner_osc_queue_path()
-  return get_ipc_dir() .. "/tuner_osc_queue.jsonl"
-end
-
-local function tuner_osc_bridge_path()
-  return get_ipc_dir() .. "/rfx_osc_bridge.py"
-end
-
-local function write_tuner_osc_bridge_script()
-  local script = [=[
-#!/usr/bin/env python3
-import json
-import os
-import socket
-import struct
-import time
-import fcntl
-
-IPC_DIR = "/tmp/rfx-ipc"
-QUEUE_PATH = os.path.join(IPC_DIR, "tuner_osc_queue.jsonl")
-LOCK_PATH = os.path.join(IPC_DIR, "rfx_osc_bridge.lock")
-LOG_PATH = os.path.join(IPC_DIR, "rfx_osc_bridge.log")
-DEST_IP = "127.0.0.1"
-DEST_PORT = 19090
-OSC_ADDRESS = "/rfx/tuner"
-
-def log(msg):
-    try:
-        with open(LOG_PATH, "a", encoding="utf-8") as f:
-            f.write(f"[{time.time():.3f}] {msg}\n")
-    except Exception:
-        pass
-
-def pad4(data: bytes) -> bytes:
-    return data + (b"\0" * ((4 - (len(data) % 4)) % 4))
-
-def osc_string(value: str) -> bytes:
-    return pad4(str(value).encode("utf-8") + b"\0")
-
-def osc_int(value) -> bytes:
-    return struct.pack(">i", int(value))
-
-def osc_float(value) -> bytes:
-    return struct.pack(">f", float(value))
-
-def make_tuner_packet(item: dict) -> bytes:
-    # /rfx/tuner string note, int octave, float cents, float confidence, int hasPitch
-    note = item.get("note") or "--"
-    octave = int(item.get("octave") or 0)
-    cents = float(item.get("cents") or 0.0)
-    confidence = float(item.get("confidence") or 0.0)
-    has_pitch = 1 if item.get("hasPitch") else 0
-
-    return b"".join([
-        osc_string(OSC_ADDRESS),
-        osc_string(",siffi"),
-        osc_string(note),
-        osc_int(octave),
-        osc_float(cents),
-        osc_float(confidence),
-        osc_int(has_pitch),
-    ])
-
-def main():
-    os.makedirs(IPC_DIR, exist_ok=True)
-    open(QUEUE_PATH, "a", encoding="utf-8").close()
-
-    lock_file = open(LOCK_PATH, "w", encoding="utf-8")
-    try:
-        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        # Another bridge is already running.
-        return
-
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    log(f"OSC bridge started -> {DEST_IP}:{DEST_PORT} address={OSC_ADDRESS}")
-
-    with open(QUEUE_PATH, "r", encoding="utf-8") as q:
-        q.seek(0, os.SEEK_END)
-
-        while True:
-            line = q.readline()
-            if not line:
-                time.sleep(0.01)
-                continue
-
-            line = line.strip()
-            if not line:
-                continue
-
-            try:
-                item = json.loads(line)
-                packet = make_tuner_packet(item)
-                sock.sendto(packet, (DEST_IP, DEST_PORT))
-            except Exception as exc:
-                log(f"send failed: {exc!r} line={line[:250]}")
-
-if __name__ == "__main__":
-    main()
-]=]
-
-  write_file(tuner_osc_bridge_path(), script)
-end
-
-local function ensure_tuner_osc_bridge()
-  write_tuner_osc_bridge_script()
-
-  -- Start a persistent Python OSC bridge in the background.
-  -- The Python script uses a file lock, so rerunning CommandWorker should not create duplicates.
-  local cmd =
-    "/usr/bin/env python3 " ..
-    string.format("%q", tuner_osc_bridge_path()) ..
-    " >/tmp/rfx-ipc/rfx_osc_bridge_stdout.log 2>/tmp/rfx-ipc/rfx_osc_bridge_stderr.log &"
-
-  os.execute(cmd)
-  log_debug("requested tuner OSC bridge start: " .. tuner_osc_bridge_path())
-end
-
-local function send_tuner_osc(tuner)
-  local ok, encoded = pcall(json.encode, {
-    ts = now_ms(),
-    hasPitch = tuner.hasPitch,
-    midiNote = tuner.midiNote,
-    note = tuner.note,
-    octave = tuner.octave,
-    cents = tuner.cents,
-    direction = tuner.direction,
-    confidence = tuner.confidence,
-    bendCentered = tuner.bendCentered,
-    eventCount = tuner.eventCount,
-  })
-
-  if ok and encoded then
-    append_file(tuner_osc_queue_path(), encoded .. "\n")
-    return true
-  end
-
-  return false
-end
-
 local function poll_tuner_bridge(state)
   state = state or read_state()
 
@@ -434,9 +293,6 @@ local function poll_tuner_bridge(state)
 
   -- Keep JSON output for debugging/Electron fallback.
   local okJson = write_json(tuner_path(), payload)
-
-  -- Send live OSC via the persistent Python UDP bridge.
-  send_tuner_osc(tuner)
 
   return okJson
 end
@@ -1695,21 +1551,56 @@ local function exec_setMode(modeName, payload)
   end
 
   local state = read_state()
+  local previousMode = normalize_app_mode(state.mode) or "perform"
+
   state.mode = mode
 
   if not write_state(state) then
     return false, "failed to write state.json"
   end
-  
+
   local okRouting, routingErr = true, nil
   if mode ~= "tuner" then
     okRouting, routingErr = apply_routing_for_app_mode(state)
   end
-    if not okRouting then
-      return false, "mode saved but routing apply failed: " .. tostring(routingErr or "")
+
+  if not okRouting then
+    return false, "mode saved but routing apply failed: " .. tostring(routingErr or "")
+  end
+
+  if mode == "tuner" then
+    local inputTrack = find_track_by_name("INPUT")
+    local tuneTrack = find_track_by_name("RFX_TUNE")
+
+    if not tuneTrack then
+      return false, "RFX_TUNE track not found"
     end
 
-  if mode == "perform" or mode == "edit" or mode == "looper" or mode == "automation" or mode == "tuner" then
+    -- Tuner owns the live hardware input while tuning.
+    -- Mono input index 1 = Input 2. Change to 0 for Input 1.
+    if inputTrack then
+      set_record_arm_mono_input(inputTrack, 1, false)
+    end
+
+    set_record_arm_mono_input(tuneTrack, 1, true)
+    set_track_main_send_enabled(tuneTrack, true)
+
+  elseif mode == "perform" and previousMode == "tuner" then
+    local inputTrack = find_track_by_name("INPUT")
+
+    if not inputTrack then
+      return false, "INPUT track not found"
+    end
+
+    -- Restore normal live input when returning from tuner to perform mode.
+    set_record_arm_mono_input(inputTrack, 1, true)
+
+    local okDefaultRecord, defaultRecordErr = apply_default_record_state()
+    if not okDefaultRecord then
+      return false, "mode saved but default record apply failed: " .. tostring(defaultRecordErr or "")
+    end
+
+  elseif mode == "perform" or mode == "edit" or mode == "looper" or mode == "automation" then
     local okDefaultRecord, defaultRecordErr = apply_default_record_state()
     if not okDefaultRecord then
       return false, "mode saved but default record apply failed: " .. tostring(defaultRecordErr or "")
@@ -1724,7 +1615,9 @@ local function exec_setMode(modeName, payload)
   end
 
   log_debug(
-    "MODE switched mode=" ..
+    "MODE switched previousMode=" ..
+    tostring(previousMode) ..
+    " mode=" ..
     tostring(mode) ..
     " payload=" ..
     payloadStr
@@ -1732,7 +1625,10 @@ local function exec_setMode(modeName, payload)
 
   request_vm_export("setMode:" .. tostring(mode))
 
-  return true, nil, { mode = mode }
+  return true, nil, {
+    mode = mode,
+    previousMode = previousMode,
+  }
 end
 
 local function execute_command(cmd)
@@ -1914,7 +1810,7 @@ end
 
 write_heartbeat()
 log_debug("Watcher started. IPC dir=" .. get_ipc_dir())
-ensure_tuner_osc_bridge()
+-- ensure_tuner_osc_bridge()
 
 do
   local s = read_state()

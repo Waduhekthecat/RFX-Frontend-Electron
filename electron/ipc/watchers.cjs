@@ -8,7 +8,7 @@ function makeSafeArray(value) {
 }
 
 function createIpcWatchers(opts = {}) {
-  const { onVm, onCmdResult, onInstalledFx } = opts;
+  const { onVm, onCmdResult, onInstalledFx, onTuner } = opts;
   const paths = getIpcPaths();
 
   let dirWatcher = null;
@@ -17,6 +17,7 @@ function createIpcWatchers(opts = {}) {
   let vmRefreshTimer = null;
   let resRefreshTimer = null;
   let pluginListRefreshTimer = null;
+  let tunerRefreshTimer = null;
 
   async function refreshVm() {
     const nextVm = await readJsonSafe(paths.vm, null);
@@ -35,6 +36,12 @@ function createIpcWatchers(opts = {}) {
     const safeList = makeSafeArray(nextList);
     if (typeof onInstalledFx === "function") onInstalledFx(safeList);
     return safeList;
+  }
+
+  async function refreshTuner() {
+    const nextTuner = await readJsonSafe(paths.tuner, null);
+    if (nextTuner && typeof onTuner === "function") onTuner(nextTuner);
+    return nextTuner;
   }
 
   function clearTimer(timer) {
@@ -63,10 +70,19 @@ function createIpcWatchers(opts = {}) {
     }, 15);
   }
 
+  function scheduleTunerRefresh() {
+    tunerRefreshTimer = clearTimer(tunerRefreshTimer);
+    tunerRefreshTimer = setTimeout(() => {
+      refreshTuner().catch(() => {});
+    }, 15);
+  }
+
   const vmBase = typeof paths.vm === "string" ? path.basename(paths.vm) : null;
   const resBase = typeof paths.res === "string" ? path.basename(paths.res) : null;
   const pluginListBase =
     typeof paths.pluginlist === "string" ? path.basename(paths.pluginlist) : null;
+  const tunerBase =
+    typeof paths.tuner === "string" ? path.basename(paths.tuner) : null;
 
   function handleDirEvent(_eventType, filename) {
     const name = typeof filename === "string" ? filename : "";
@@ -75,6 +91,7 @@ function createIpcWatchers(opts = {}) {
       scheduleVmRefresh();
       scheduleResRefresh();
       if (pluginListBase) schedulePluginListRefresh();
+      if (tunerBase) scheduleTunerRefresh();
       return;
     }
 
@@ -92,6 +109,11 @@ function createIpcWatchers(opts = {}) {
       schedulePluginListRefresh();
       return;
     }
+
+    if (tunerBase && name === tunerBase) {
+      scheduleTunerRefresh();
+      return;
+    }
   }
 
   async function start() {
@@ -100,8 +122,13 @@ function createIpcWatchers(opts = {}) {
 
     await refreshVm().catch(() => {});
     await refreshCmdResult().catch(() => {});
+
     if (paths.pluginlist) {
       await refreshInstalledFx().catch(() => {});
+    }
+
+    if (paths.tuner) {
+      await refreshTuner().catch(() => {});
     }
 
     try {
@@ -117,6 +144,7 @@ function createIpcWatchers(opts = {}) {
     vmRefreshTimer = clearTimer(vmRefreshTimer);
     resRefreshTimer = clearTimer(resRefreshTimer);
     pluginListRefreshTimer = clearTimer(pluginListRefreshTimer);
+    tunerRefreshTimer = clearTimer(tunerRefreshTimer);
 
     try {
       dirWatcher?.close();
@@ -131,6 +159,7 @@ function createIpcWatchers(opts = {}) {
     refreshVm,
     refreshCmdResult,
     refreshInstalledFx,
+    refreshTuner,
   };
 }
 

@@ -17,6 +17,7 @@ import { MidiRuntime } from "../core/midi/MidiRuntime";
 import { LooperView } from "../views/modes/looper/LooperView"; 
 import { AutomationView } from "../views/modes/automation/AutomationView";
 import { TunerView } from "../views/modes/tuner/TunerView";
+import { FxModulesView } from "../views/fxModules/FxModulesView";
 
 const Router =
     import.meta.env.MODE === "development" ? BrowserRouter : HashRouter;
@@ -41,6 +42,7 @@ export function App() {
                                 <Route path="/looper" element={<LooperView />} />
                                 <Route path="/automation" element={<AutomationView />} />
                                 <Route path="/tuner" element={<TunerView />} />
+                                <Route path="/fx-modules" element={<FxModulesView />} />
                                 <Route path="/routing" element={<RouteView />} />
                                 <Route path="/system" element={<SystemView />} />
                                 <Route path="/system/plugins" element={<PluginManager />} />

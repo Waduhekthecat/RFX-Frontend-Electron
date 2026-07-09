@@ -1,6 +1,6 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
-contextBridge.exposeInMainWorld("rfx", {
+const rfxApi = {
   transport: {
     boot: () => ipcRenderer.invoke("rfx:boot"),
     syscall: (call) => ipcRenderer.invoke("rfx:syscall", call),
@@ -10,6 +10,9 @@ contextBridge.exposeInMainWorld("rfx", {
     getSnapshot: () => ipcRenderer.invoke("rfx:getSnapshot"),
     getInstalledFx: () => ipcRenderer.invoke("rfx:getInstalledFx"),
     getBootState: () => ipcRenderer.invoke("rfx:getBootState"),
+    tuner: {
+      read: () => ipcRenderer.invoke("rfx:tuner:read"),
+    },
 
     onViewModel: (cb) => {
       const handler = (_evt, snap) => cb(snap);
@@ -58,5 +61,13 @@ contextBridge.exposeInMainWorld("rfx", {
       ipcRenderer.on("midi:message", handler);
       return () => ipcRenderer.removeListener("midi:message", handler);
     },
+  },
+};
+
+contextBridge.exposeInMainWorld("rfx", rfxApi);
+
+contextBridge.exposeInMainWorld("rfxAPI", {
+  tuner: {
+    read: () => ipcRenderer.invoke("rfx:tuner:read"),
   },
 });

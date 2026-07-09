@@ -25,6 +25,7 @@ function asNum(x, fallback = 0) {
 }
 
 const LOOPER_TYPES = new Set(["pre-fx", "post-fx"]);
+const FX_MODULES_INSTRUMENTS = new Set(["Guitar", "Bass", "Vox", "Drums", "Synth"]);
 const LOOPER_STATUSES = new Set([
   "idle",
   "recording",
@@ -34,6 +35,7 @@ const LOOPER_STATUSES = new Set([
 ]);
 
 export const DEFAULT_LOOPER_TYPE = "post-fx";
+export const DEFAULT_FX_MODULES_INSTRUMENT = "Guitar";
 
 export const DEFAULT_LOOPER_STATE = Object.freeze({
   status: "idle",
@@ -56,6 +58,11 @@ const NOTE_LENGTH_VALUES = new Set([2, 4, 8, 16]);
 function asLooperTypeValue(value, fallback = DEFAULT_LOOPER_TYPE) {
   const raw = asStr(value, "").toLowerCase();
   return LOOPER_TYPES.has(raw) ? raw : fallback;
+}
+
+function asFxModulesInstrument(value, fallback = DEFAULT_FX_MODULES_INSTRUMENT) {
+  const raw = asStr(value, "");
+  return FX_MODULES_INSTRUMENTS.has(raw) ? raw : fallback;
 }
 
 function asLooperStatus(value, fallback = DEFAULT_LOOPER_STATE.status) {
@@ -498,6 +505,19 @@ export const useRfxStore = create((set, get) => ({
     activeBusId: null,
   },
 
+  tuner: {
+    hasPitch: false,
+    midiNote: 0,
+    note: "--",
+    octave: "",
+    cents: 0,
+    direction: 0,
+    confidence: 0,
+    bendCentered: false,
+    eventCount: 0,
+    stale: true,
+  },
+
   perf: {
     buses: null,
     activeBusId: null,
@@ -521,6 +541,7 @@ export const useRfxStore = create((set, get) => ({
     selectedTrackGuid: null,
     selectedFxGuid: null,
     tunerMuted: true,
+    fxModulesInstrument: DEFAULT_FX_MODULES_INSTRUMENT,
     looperType: DEFAULT_LOOPER_TYPE,
     looper: { ...DEFAULT_LOOPER_STATE },
     tempoBpm: DEFAULT_SESSION_TEMPO_BPM,
@@ -722,6 +743,20 @@ export const useRfxStore = create((set, get) => ({
     }));
   },
 
+  setFxModulesInstrument: (instrument) => {
+    const nextInstrument = asFxModulesInstrument(instrument, "");
+    if (!nextInstrument) return;
+    set((s) => ({
+      session: {
+        ...s.session,
+        fxModulesInstrument: nextInstrument,
+      },
+    }));
+    get().logEvent("fx_modules:instrument_updated", {
+      instrument: nextInstrument,
+    });
+  },
+
   setLooperStatus: (status) => {
     const nextStatus = asLooperStatus(status, "");
     if (!nextStatus) return;
@@ -821,6 +856,22 @@ export const useRfxStore = create((set, get) => ({
       tunerMuted: nextMuted,
     });
   },
+
+  setTuner: (tuner) =>
+    set({
+      tuner: {
+        hasPitch: tuner?.hasPitch === true || tuner?.hasPitch === 1,
+        midiNote: tuner?.midiNote ?? 0,
+        note: tuner?.note ?? "--",
+        octave: tuner?.octave ?? "",
+        cents: tuner?.cents ?? 0,
+        direction: tuner?.direction ?? 0,
+        confidence: tuner?.confidence ?? 0,
+        bendCentered: tuner?.bendCentered === true,
+        eventCount: tuner?.eventCount ?? 0,
+        stale: false,
+      },
+    }),
 
   toggleTunerMuted: () => {
     set((s) => ({

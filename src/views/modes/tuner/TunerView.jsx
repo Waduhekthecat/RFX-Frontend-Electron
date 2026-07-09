@@ -67,7 +67,8 @@ function formatCents(centsValue) {
 
 export function TunerView() {
     const [activeControls, setActiveControls] = React.useState(() => new Set());
-    const [tunerState, setTunerState] = React.useState(null);
+    const tunerState = useRfxStore((state) => state.tuner);
+    const setTuner = useRfxStore((state) => state.setTuner);
     const tunerMuted = useRfxStore((state) => state.session?.tunerMuted ?? true);
     const setTunerMuted = useRfxStore((state) => state.setTunerMuted);
     const dispatchIntent = useRfxStore((state) => state.dispatchIntent);
@@ -148,18 +149,40 @@ export function TunerView() {
         const api = window.rfx?.transport;
         if (!api?.onTunerData) return undefined;
 
-        // Subscribe to tuner IPC events from the main process. Add a debug
-        // log so we can confirm events are arriving in the renderer.
         return api.onTunerData((next) => {
-            try {
-                // Helpful debug: visible in renderer console (DevTools)
-                // and also appears in any attached renderer logs.
-                console.log("[TUNER] ipc -> renderer", next);
-            } catch (e) {}
-
-            setTunerState(next ?? null);
+            setTuner(next ?? {});
         });
-    }, []);
+    }, [setTuner]);
+
+    React.useEffect(() => {
+        let cancelled = false;
+
+        const readTuner = async () => {
+            if (modeManager.getMode() !== RFX_MODES.TUNER) return;
+
+            const read =
+                window.rfxAPI?.tuner?.read ||
+                window.rfx?.transport?.tuner?.read;
+
+            if (!read) return;
+
+            try {
+                const next = await read();
+                if (!cancelled) setTuner(next ?? {});
+            } catch (error) {
+                console.warn("[TUNER] failed to poll tuner data", error);
+            }
+        };
+
+        void readTuner();
+        const timer = window.setInterval(readTuner, 75);
+
+        return () => {
+            cancelled = true;
+            window.clearInterval(timer);
+        };
+    }, [setTuner]);
+
     // Display state shown in the UI. This differs from `tunerState` which is
     // the raw incoming payload — when we receive a blank reading we wait 2s
     // before clearing the visible note to "--".

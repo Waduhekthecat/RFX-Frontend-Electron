@@ -1,10 +1,5 @@
 const path = require("path");
 
-// const { app } = require("electron");
-// function getIpcDir() {
-//   return path.join(app.getPath("userData"), "rfx-ipc");
-// }
-
 function getIpcDir() {
   return "/tmp/rfx-ipc";
 }
@@ -19,6 +14,7 @@ function getIpcPaths() {
     looperInputGainProcessing: path.join(dir, "looper_input_gain.processing.json"),
     vm: path.join(dir, "vm.json"),
     pluginlist: path.join(dir, "installed_plugins.json"),
+    tuner: path.join(dir, "tuner.json"),
   };
 }
 

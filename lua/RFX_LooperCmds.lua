@@ -11,6 +11,7 @@ local loopRecordCount = 0
 local loopRecordStack = {}
 local loopLengthBars = nil
 local originalLpPreGuid = nil
+local postFxRecordStartItemGuids = nil
 
 ----------------------------------------------------------------------
 -- BASIC HELPERS
@@ -37,6 +38,10 @@ end
 local function show(msg)
   -- Intentionally quiet. Public command handlers log one normalized line via dump_command().
   return msg
+end
+
+local function debug_log(msg)
+  reaper.ShowConsoleMsg(tostring(msg or "") .. "\n")
 end
 
 local function normalize_looper_type(value)
@@ -308,6 +313,63 @@ local function get_item_debug_string(item)
     " takes=" .. tostring(takeCount)
 end
 
+local function get_item_guid(item)
+  if not item then return nil end
+  if reaper.BR_GetMediaItemGUID then
+    local guid = reaper.BR_GetMediaItemGUID(item)
+    if guid and guid ~= "" then
+      return tostring(guid)
+    end
+  end
+  return tostring(item)
+end
+
+local function snapshot_track_item_guids(track)
+  local snapshot = {
+    guids = {},
+    count = 0,
+  }
+
+  if not track then
+    return snapshot
+  end
+
+  local itemCount = reaper.CountTrackMediaItems(track)
+
+  for i = 0, itemCount - 1 do
+    local item = reaper.GetTrackMediaItem(track, i)
+    local guid = get_item_guid(item)
+
+    if guid then
+      snapshot.guids[guid] = true
+      snapshot.count = snapshot.count + 1
+    end
+  end
+
+  return snapshot
+end
+
+local function collect_new_items_since_snapshot(track, snapshot)
+  local items = {}
+
+  if not track or not snapshot or type(snapshot.guids) ~= "table" then
+    return items
+  end
+
+  local itemCount = reaper.CountTrackMediaItems(track)
+
+  for i = 0, itemCount - 1 do
+    local item = reaper.GetTrackMediaItem(track, i)
+    local guid = get_item_guid(item)
+
+    if guid and not snapshot.guids[guid] then
+      items[#items + 1] = item
+    end
+  end
+
+  return items
+end
+
 local function debug_dump_loop_items(trackName)
   local tr = find_track_by_name(trackName)
 
@@ -385,6 +447,39 @@ local function push_latest_loop_record()
     return false
   end
 
+  if looperType == "post_fx" then
+    local newItems = collect_new_items_since_snapshot(tr, postFxRecordStartItemGuids)
+    local snapshotCount = postFxRecordStartItemGuids and postFxRecordStartItemGuids.count or 0
+
+    debug_log("[LOOPER POST_FX STACK PUSH] snapshot item count=" .. tostring(snapshotCount))
+    debug_log("[LOOPER POST_FX STACK PUSH] new item count=" .. tostring(#newItems))
+
+    if #newItems > 0 then
+      loopRecordStack[#loopRecordStack + 1] = {
+        item = newItems[#newItems],
+        items = newItems,
+        trackName = trackName,
+        looperType = looperType,
+      }
+
+      postFxRecordStartItemGuids = nil
+
+      show("[LOOPER STACK PUSH]")
+      show("looperType=" .. tostring(looperType))
+      show("recordTrack=" .. tostring(trackName))
+      show("itemCount=" .. tostring(#newItems))
+      show("stack size=" .. tostring(#loopRecordStack))
+
+      for i = 1, #newItems do
+        show("#" .. tostring(i) .. " " .. get_item_debug_string(newItems[i]))
+      end
+
+      return true
+    end
+
+    postFxRecordStartItemGuids = nil
+  end
+
   local item = get_selected_item_on_track(tr) or get_latest_item_on_track(tr)
 
   if not item then
@@ -417,7 +512,14 @@ local function pop_latest_loop_record()
   if entry then
     show("looperType=" .. tostring(entry.looperType))
     show("recordTrack=" .. tostring(entry.trackName))
-    show(get_item_debug_string(entry.item))
+    if type(entry.items) == "table" then
+      show("itemCount=" .. tostring(#entry.items))
+      for i = 1, #entry.items do
+        show("#" .. tostring(i) .. " " .. get_item_debug_string(entry.items[i]))
+      end
+    else
+      show(get_item_debug_string(entry.item))
+    end
   else
     show("entry=nil")
   end
@@ -568,16 +670,51 @@ local function delete_latest_loop_record()
   local source = "stack"
   local trackName = currentTrackName
   local item = nil
+  local items = nil
 
   if entry then
     trackName = entry.trackName or currentTrackName
     item = entry.item
+    if type(entry.items) == "table" and #entry.items > 0 then
+      items = entry.items
+    end
   end
 
   local tr = find_track_by_name(trackName)
 
   if not tr then
     return false, "missing track: " .. tostring(trackName)
+  end
+
+  if items then
+    local deletedCount = 0
+
+    show("[LOOPER UNDO DELETE]")
+    show("currentLooperType=" .. tostring(currentLooperType))
+    show("deleteTrack=" .. tostring(trackName))
+    show("source=" .. tostring(source))
+    show("itemCount=" .. tostring(#items))
+
+    for i = #items, 1, -1 do
+      local stackItem = items[i]
+
+      if stackItem and reaper.ValidatePtr2(0, stackItem, "MediaItem*") then
+        show("#" .. tostring(i) .. " " .. get_item_debug_string(stackItem))
+        reaper.DeleteTrackMediaItem(tr, stackItem)
+        deletedCount = deletedCount + 1
+      else
+        show("#" .. tostring(i) .. " invalid item")
+      end
+    end
+
+    if deletedCount > 0 then
+      reaper.UpdateArrange()
+      debug_log("[LOOPER] deleted item count during undo=" .. tostring(deletedCount))
+      show("[LOOPER] deleted loop layer from " .. tostring(trackName) .. " via " .. tostring(source))
+      return true, "items"
+    end
+
+    show("[LOOPER] stack layer had no valid items; falling back to latest item")
   end
 
   if not item or not reaper.ValidatePtr2(0, item, "MediaItem*") then
@@ -600,6 +737,7 @@ local function delete_latest_loop_record()
   reaper.DeleteTrackMediaItem(tr, item)
   reaper.UpdateArrange()
 
+  debug_log("[LOOPER] deleted item count during undo=1")
   show("[LOOPER] deleted loop item from " .. tostring(trackName) .. " via " .. tostring(source))
 
   return true, "item"
@@ -751,6 +889,14 @@ local function start_record_now(payload)
   if recCount == 0 then
     ensure_repeat_enabled()
     goto_project_start()
+  end
+
+  if looperType == "post_fx" then
+    local lpPostTrack = find_track_by_name("LP_POST")
+    postFxRecordStartItemGuids = snapshot_track_item_guids(lpPostTrack)
+    debug_log("[LOOPER POST_FX SNAPSHOT] item count at record start=" .. tostring(postFxRecordStartItemGuids.count))
+  else
+    postFxRecordStartItemGuids = nil
   end
 
   start_recording()
@@ -958,6 +1104,7 @@ function M.clear(payload)
   loopRecordCount = 0
   loopRecordStack = {}
   loopLengthBars = nil
+  postFxRecordStartItemGuids = nil
 
   clear_loop_time_selection()
   goto_project_start()
@@ -966,6 +1113,7 @@ function M.clear(payload)
   show("[LOOPER] record count reset to 0")
   show("[LOOPER] stack reset")
   show("[LOOPER] loopLengthBars reset")
+  show("[LOOPER] post_fx record snapshot reset")
   show("[LOOPER] time selection cleared")
   show("[LOOPER] playhead moved to project start")
   show("[LOOPER] delete loop audio complete")
@@ -1011,6 +1159,7 @@ function M.toggle_type(payload)
 
   loopRecordCount = 0
   loopRecordStack = {}
+  postFxRecordStartItemGuids = nil
 
   if requestedType == "pre_fx" then
     cache_original_lp_pre_guid()

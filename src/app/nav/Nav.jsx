@@ -6,6 +6,7 @@ import { RFX_MODES } from "../../core/modes/Modes";
 
 const BASE_TABS = [
   { label: "Perform", to: "/", mode: RFX_MODES.PERFORM },
+  { label: "FX", to: "/fx-modules" },
   { label: "Edit", to: "/edit", mode: RFX_MODES.EDIT },
   { label: "Looper", to: "/looper", mode: RFX_MODES.LOOPER },
   { label: "Automation", to: "/automation", mode: RFX_MODES.AUTOMATION },
