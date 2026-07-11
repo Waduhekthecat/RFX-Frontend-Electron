@@ -4,12 +4,28 @@ import { MIDI_CONTROLS } from "../../../core/midi/MidiMapper";
 import { Knob } from "../../../components/controls/knobs/Knob";
 import { modeManager } from "../../../core/modes/ModeManager";
 import { RFX_MODES } from "../../../core/modes/Modes";
-import { useRfxStore } from "../../../core/rfx/Store";
+import {
+  DEFAULT_LOOPER_STATE,
+  DEFAULT_SESSION_BEATS_PER_MEASURE,
+  DEFAULT_SESSION_CLICK_ENABLED,
+  DEFAULT_SESSION_COUNT_IN_ENABLED,
+  DEFAULT_SESSION_NOTE_LENGTH,
+  DEFAULT_SESSION_TEMPO_BPM,
+  useRfxStore,
+} from "../../../core/rfx/Store";
 import { AutomatableParameterCard } from "./components/AutomatableParameterCard";
 
 const MOMENTARY_ACTIVE_MS = 350;
 const EXPRESSION_IDLE_MS = 250;
 const AUTOMATION_PREVIEW_TICK_MS = 33;
+const TAP_TEMPO_FLASH_MS = 180;
+const TAP_TEMPO_RESET_MS = 2000;
+const MAX_TAP_TEMPO_TIMES = 4;
+const MIN_TEMPO_BPM = 40;
+const MAX_TEMPO_BPM = 240;
+const LOOP_LENGTH_VALUES = [4, 8, 16, 32, 2];
+const BEATS_PER_MEASURE_VALUES = [4, 6, 7, 8, 16, 2, 3];
+const NOTE_LENGTH_VALUES = [4, 8, 16, 2];
 
 const AUTOMATION_GESTURES = Object.freeze({
   FS_A_LONG: "FS_A_LONG",
@@ -29,6 +45,10 @@ const CONTROL_COLORS = {
 
   blueFaint: "border-sky-300/25 bg-sky-400/5",
   blueActive: "border-sky-300 bg-sky-400/20 shadow-[0_0_18px_rgba(56,189,248,0.35)]",
+
+  grayFaint: "border-white/15 bg-white/5 hover:border-white/25 hover:bg-white/10",
+  amberActive: "border-amber-300/70 bg-amber-400/20 shadow-[0_0_18px_rgba(251,191,36,0.35)]",
+  purpleActive: "border-purple-300/70 bg-purple-400/20 shadow-[0_0_18px_rgba(192,132,252,0.35)]",
 };
 
 const AUTOMATION_DEBUG_BADGES = [
@@ -44,13 +64,18 @@ const AUTOMATION_DEBUG_BADGES = [
 
 const MOMENTARY_CONTROLS = new Set(AUTOMATION_DEBUG_BADGES.map((badge) => badge.control));
 const DISABLED_AUTOMATION_BADGE_CONTROLS = new Set([
-  AUTOMATION_GESTURES.FS_A_LONG,
   AUTOMATION_GESTURES.FS_D_LONG,
 ]);
 const EMPTY_OBJ = Object.freeze({});
 const EMPTY_ARR = Object.freeze([]);
 
 const clamp01 = (value = 0) => Math.max(0, Math.min(value, 1));
+const clampTempoBpm = (value) =>
+  Math.max(MIN_TEMPO_BPM, Math.min(Math.round(Number(value)), MAX_TEMPO_BPM));
+const cycleValue = (values, currentValue) => {
+  const currentIndex = values.indexOf(Number(currentValue));
+  return values[(currentIndex + 1) % values.length];
+};
 const midiValueToAutomationValue = (value = 0) => clamp01(value / 127);
 const formatAutomationValue = (value01 = 0) => `${Math.round(clamp01(value01) * 100)}%`;
 
@@ -100,13 +125,9 @@ function AutomationWorkspace({
   onToggleArmed,
 }) {
   return (
-    <div className="h-full min-h-[220px] rounded-xl border border-white/10 bg-black/20 p-4">
-      <div className="text-[11px] uppercase tracking-[0.18em] text-white/50">
-        Automation Workspace
-      </div>
-
+    <div className="h-full min-h-[160px] rounded-xl border border-white/10 bg-black/20 p-4">
       {parameters.length ? (
-        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
           {parameters.slice(0, 5).map((parameter) => (
             <AutomatableParameterCard
               key={`${parameter.trackGuid}:${parameter.fxGuid}:${parameter.paramIndex}`}
@@ -120,10 +141,113 @@ function AutomationWorkspace({
           ))}
         </div>
       ) : (
-        <div className="flex h-[calc(100%-2rem)] min-h-[150px] items-center justify-center text-sm text-white/45">
+        <div className="flex h-full min-h-[150px] items-center justify-center text-sm text-white/45">
           No automation parameters selected
         </div>
       )}
+    </div>
+  );
+}
+
+function AutomationSessionControls({
+  tempoBpm,
+  isTapTempoActive,
+  onTapTempo,
+  clickEnabled,
+  onToggleClick,
+  countInEnabled,
+  onToggleCountIn,
+  loopLengthEnabled,
+  loopLength,
+  onToggleLoopLength,
+  onCycleLoopLength,
+  beatsPerMeasure,
+  noteLength,
+  onCycleBeatsPerMeasure,
+  onCycleNoteLength,
+}) {
+  return (
+    <div className="flex min-h-[64px] items-center rounded-xl border border-white/10 bg-black/20 p-2">
+      <div className="ml-4 shrink-0 text-[11px] uppercase tracking-[0.18em] text-white/50">
+        Automation Workspace
+      </div>
+
+      <div className="flex flex-1 flex-wrap items-center justify-center gap-2">
+        <div className={`flex h-[56px] w-[92px] items-center justify-center rounded-xl border px-3 py-2 text-sm font-semibold tabular-nums text-white/65 ${CONTROL_COLORS.grayFaint}`}>
+          {tempoBpm} BPM
+        </div>
+
+        <button
+          type="button"
+          onClick={onTapTempo}
+          className={`h-[56px] w-[92px] shrink-0 rounded-xl border px-5 py-2 text-base font-semibold text-white transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-300/70 ${isTapTempoActive ? CONTROL_COLORS.blueActive : CONTROL_COLORS.blueFaint}`}
+        >
+          TAP
+        </button>
+
+        <div className={`flex h-[56px] shrink-0 overflow-hidden rounded-xl border transition-all duration-150 ${clickEnabled ? "border-amber-300/45 bg-amber-400/5" : "border-white/10 bg-white/[0.03]"}`}>
+          <button
+            type="button"
+            onClick={onToggleClick}
+            aria-pressed={clickEnabled}
+            className={`w-[92px] border-r border-white/10 px-3 py-2 text-sm font-semibold text-white transition-all duration-150 focus:outline-none focus-visible:bg-amber-300/15 ${clickEnabled ? CONTROL_COLORS.amberActive : CONTROL_COLORS.grayFaint}`}
+          >
+            CLICK
+          </button>
+          <button
+            type="button"
+            onClick={onToggleCountIn}
+            disabled={!clickEnabled}
+            aria-disabled={!clickEnabled}
+            aria-pressed={countInEnabled}
+            className={`w-[128px] px-3 py-2 text-sm font-semibold text-white transition-all duration-150 focus:outline-none focus-visible:bg-purple-300/15 ${clickEnabled ? (countInEnabled ? CONTROL_COLORS.purpleActive : CONTROL_COLORS.grayFaint) : "cursor-not-allowed bg-white/[0.02] text-white/35"}`}
+          >
+            COUNT-IN
+          </button>
+        </div>
+
+        <div className={`flex h-[56px] shrink-0 overflow-hidden rounded-xl border transition-all duration-150 ${loopLengthEnabled ? "border-emerald-300/45 bg-emerald-400/5" : "border-white/10 bg-white/[0.03]"}`}>
+          <button
+            type="button"
+            onClick={onToggleLoopLength}
+            aria-pressed={loopLengthEnabled}
+            className={`w-[104px] border-r border-white/10 px-3 py-2 text-sm font-semibold text-white transition-all duration-150 focus:outline-none focus-visible:bg-emerald-300/15 ${loopLengthEnabled ? CONTROL_COLORS.greenActive : CONTROL_COLORS.grayFaint}`}
+          >
+            LENGTH
+          </button>
+          <button
+            type="button"
+            onClick={onCycleLoopLength}
+            disabled={!loopLengthEnabled}
+            aria-disabled={!loopLengthEnabled}
+            className={`w-[92px] px-3 py-2 text-sm font-semibold text-white transition-all duration-150 focus:outline-none focus-visible:bg-emerald-300/15 ${loopLengthEnabled ? CONTROL_COLORS.greenFaint : "cursor-not-allowed bg-white/[0.02] text-white/35"}`}
+          >
+            {loopLength} BARS
+          </button>
+        </div>
+
+        <div className="flex h-[56px] shrink-0 overflow-hidden rounded-xl border border-sky-300/25 bg-sky-400/5">
+          <div className="flex w-[48px] items-center justify-center border-r border-white/10 px-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-sky-100/60">
+            Time
+          </div>
+          <button
+            type="button"
+            onClick={onCycleBeatsPerMeasure}
+            aria-label={`Beats per measure: ${beatsPerMeasure}`}
+            className="w-[54px] border-r border-white/10 text-xl font-semibold tabular-nums text-sky-100 transition-colors hover:bg-sky-300/10 focus:outline-none focus-visible:bg-sky-300/15"
+          >
+            {beatsPerMeasure}
+          </button>
+          <button
+            type="button"
+            onClick={onCycleNoteLength}
+            aria-label={`Note length: ${noteLength}`}
+            className="w-[54px] text-xl font-semibold tabular-nums text-sky-100 transition-colors hover:bg-sky-300/10 focus:outline-none focus-visible:bg-sky-300/15"
+          >
+            {noteLength}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -132,6 +256,7 @@ export function AutomationView() {
   const [activeControls, setActiveControls] = React.useState(() => new Set());
   const [automationValue, setAutomationValue] = React.useState(0);
   const [isExpressionActive, setIsExpressionActive] = React.useState(false);
+  const [isTapTempoActive, setIsTapTempoActive] = React.useState(false);
   const [isRecording, setIsRecording] = React.useState(false);
   const [isPlaying, setIsPlaying] = React.useState(false);
   const [automationDurationMs, setAutomationDurationMs] = React.useState(0);
@@ -140,6 +265,12 @@ export function AutomationView() {
   const activeBusId = useRfxStore((state) => state.perf?.activeBusId ?? state.meters?.activeBusId ?? null);
   const buses = useRfxStore((state) => state.perf?.buses ?? []);
   const knobMapByBusId = useRfxStore((state) => state.perf?.knobMapByBusId ?? EMPTY_OBJ);
+  const looper = useRfxStore((state) => state.session?.looper ?? DEFAULT_LOOPER_STATE);
+  const tempoBpm = useRfxStore((state) => state.session?.tempoBpm ?? DEFAULT_SESSION_TEMPO_BPM);
+  const clickEnabled = useRfxStore((state) => state.session?.clickEnabled ?? DEFAULT_SESSION_CLICK_ENABLED);
+  const countInEnabled = useRfxStore((state) => state.session?.countInEnabled ?? DEFAULT_SESSION_COUNT_IN_ENABLED);
+  const beatsPerMeasure = useRfxStore((state) => state.session?.beatsPerMeasure ?? DEFAULT_SESSION_BEATS_PER_MEASURE);
+  const noteLength = useRfxStore((state) => state.session?.noteLength ?? DEFAULT_SESSION_NOTE_LENGTH);
   const automatableParameters = useRfxStore(
     (state) => state.automation?.automatableParameters ?? EMPTY_ARR
   );
@@ -152,11 +283,21 @@ export function AutomationView() {
   const toggleArmedAutomationParameter = useRfxStore(
     (state) => state.toggleArmedAutomationParameter
   );
+  const dispatchIntent = useRfxStore((state) => state.dispatchIntent);
+  const setLooperTempoBpm = useRfxStore((state) => state.setLooperTempoBpm);
+  const setLooperClickEnabled = useRfxStore((state) => state.setLooperClickEnabled);
+  const setLooperCountInEnabled = useRfxStore((state) => state.setLooperCountInEnabled);
+  const setLoopLengthEnabled = useRfxStore((state) => state.setLoopLengthEnabled);
+  const setLoopLength = useRfxStore((state) => state.setLoopLength);
+  const setTimeSignature = useRfxStore((state) => state.setTimeSignature);
 
   const releaseTimersRef = React.useRef(new Map());
   const expressionTimerRef = React.useRef(null);
+  const tapTempoTimerRef = React.useRef(null);
+  const tapTimesRef = React.useRef([]);
   const recordingStartRef = React.useRef(null);
   const playbackStartRef = React.useRef(null);
+  const automationValueRef = React.useRef(0);
 
   const busId = String(activeBusId || buses?.[0]?.id || "NONE");
   const sliderKnobId = `${busId}_k7`;
@@ -164,9 +305,34 @@ export function AutomationView() {
     () => getKnobTargets(knobMapByBusId?.[busId]?.[sliderKnobId]).slice(0, 3),
     [busId, knobMapByBusId, sliderKnobId]
   );
-  const mappedLabel = sliderTargets.length
+  const sliderMappedLabel = sliderTargets.length
     ? sliderTargets.map((target) => target.paramName || `#${target.paramIdx}`).join(" • ")
     : "";
+  const automationExpressionTargets = React.useMemo(
+    () =>
+      armedAutomationParameters
+        .map((parameter) => {
+          const paramIdx = Number(parameter?.paramIndex ?? parameter?.paramIdx);
+          if (
+            !parameter?.fxGuid ||
+            !Number.isFinite(paramIdx)
+          ) {
+            return null;
+          }
+
+          return {
+            trackGuid: parameter.trackGuid || "",
+            fxGuid: String(parameter.fxGuid),
+            paramIdx,
+            label: parameter.paramName || `#${paramIdx}`,
+          };
+        })
+        .filter(Boolean),
+    [armedAutomationParameters]
+  );
+  const automationExpressionLabel = automationExpressionTargets.length
+    ? automationExpressionTargets.map((target) => target.label).join(" • ")
+    : sliderMappedLabel;
 
   const armDefaultParameterEnvelopesIfReady = React.useCallback(() => {
     console.log(
@@ -182,6 +348,34 @@ export function AutomationView() {
   React.useEffect(() => {
     armDefaultParameterEnvelopesIfReady();
   }, [armDefaultParameterEnvelopesIfReady]);
+
+  const toggleAutomationParameterEnvelope = React.useCallback((parameter) => {
+    const isArmed = armedAutomationParameters.some((armedParameter) =>
+      sameParameterTarget(parameter, armedParameter)
+    );
+    const paramIdx = Number(parameter?.paramIndex ?? parameter?.paramIdx);
+
+    toggleArmedAutomationParameter(parameter);
+
+    if (
+      !parameter?.trackGuid ||
+      !parameter?.fxGuid ||
+      !Number.isFinite(paramIdx)
+    ) {
+      return;
+    }
+
+    void dispatchIntent({
+      name: isArmed ? "setUnarm" : "setArm",
+      trackGuid: parameter.trackGuid,
+      fxGuid: parameter.fxGuid,
+      paramIdx,
+      paramIndex: paramIdx,
+      paramName: parameter.paramName || null,
+      fxName: parameter.fxName || null,
+      trackName: parameter.trackName || null,
+    });
+  }, [armedAutomationParameters, dispatchIntent, toggleArmedAutomationParameter]);
 
   const getBadgeClasses = React.useCallback((badge) => {
     if (badge.color === "red") {
@@ -242,9 +436,29 @@ export function AutomationView() {
     releaseTimersRef.current.set(control, timer);
   }, [clearControlTimer, setControlActive]);
 
+  const dispatchAutomationExpressionValue = React.useCallback((value01, phase) => {
+    const value = clamp01(value01);
+
+    for (const target of automationExpressionTargets) {
+      dispatchIntent({
+        name: "setParamValue",
+        phase,
+        gestureId: "automation:expr",
+        trackGuid: target.trackGuid,
+        fxGuid: target.fxGuid,
+        paramIdx: target.paramIdx,
+        value01: value,
+      });
+    }
+  }, [automationExpressionTargets, dispatchIntent]);
+
   const activateExpression = React.useCallback((value01) => {
-    setAutomationValue(clamp01(value01));
+    const value = clamp01(value01);
+
+    automationValueRef.current = value;
+    setAutomationValue(value);
     setIsExpressionActive(true);
+    dispatchAutomationExpressionValue(value, "preview");
 
     if (expressionTimerRef.current) window.clearTimeout(expressionTimerRef.current);
 
@@ -252,7 +466,109 @@ export function AutomationView() {
       setIsExpressionActive(false);
       expressionTimerRef.current = null;
     }, EXPRESSION_IDLE_MS);
-  }, []);
+  }, [dispatchAutomationExpressionValue]);
+
+  const commitExpression = React.useCallback(() => {
+    dispatchAutomationExpressionValue(automationValueRef.current, "commit");
+  }, [dispatchAutomationExpressionValue]);
+
+  const handleTapTempo = React.useCallback(() => {
+    const now = performance.now();
+    const currentTapTimes = tapTimesRef.current;
+    const lastTapTime = currentTapTimes.at(-1);
+    const recentTapTimes =
+      lastTapTime && now - lastTapTime <= TAP_TEMPO_RESET_MS
+        ? currentTapTimes
+        : [];
+    const nextTapTimes = [...recentTapTimes, now].slice(-MAX_TAP_TEMPO_TIMES);
+    tapTimesRef.current = nextTapTimes;
+
+    if (nextTapTimes.length >= 2) {
+      const intervals = nextTapTimes
+        .slice(1)
+        .map((tapTime, index) => tapTime - nextTapTimes[index]);
+      const averageIntervalMs =
+        intervals.reduce((total, interval) => total + interval, 0) / intervals.length;
+      const nextBpm = clampTempoBpm(60000 / averageIntervalMs);
+
+      setLooperTempoBpm(nextBpm);
+      void dispatchIntent({ name: "setTempo", bpm: nextBpm });
+    }
+
+    setIsTapTempoActive(true);
+
+    if (tapTempoTimerRef.current) {
+      window.clearTimeout(tapTempoTimerRef.current);
+    }
+
+    tapTempoTimerRef.current = window.setTimeout(() => {
+      setIsTapTempoActive(false);
+      tapTempoTimerRef.current = null;
+    }, TAP_TEMPO_FLASH_MS);
+  }, [dispatchIntent, setLooperTempoBpm]);
+
+  const toggleClick = React.useCallback(() => {
+    const nextClickEnabled = !clickEnabled;
+    setLooperClickEnabled(nextClickEnabled);
+    void dispatchIntent({ name: "setClickEnabled", enabled: nextClickEnabled });
+  }, [clickEnabled, dispatchIntent, setLooperClickEnabled]);
+
+  const toggleCountIn = React.useCallback(() => {
+    const nextCountInEnabled = !countInEnabled;
+    setLooperCountInEnabled(nextCountInEnabled);
+    void dispatchIntent({ name: "setCountInEnabled", enabled: nextCountInEnabled });
+  }, [countInEnabled, dispatchIntent, setLooperCountInEnabled]);
+
+  const toggleLoopLength = React.useCallback(() => {
+    const nextEnabled = !looper.loopLengthEnabled;
+    setLoopLengthEnabled(nextEnabled);
+    void dispatchIntent({ name: "setLoopLengthEnabled", enabled: nextEnabled });
+  }, [dispatchIntent, looper.loopLengthEnabled, setLoopLengthEnabled]);
+
+  const cycleLoopLength = React.useCallback(() => {
+    const nextLoopLength = cycleValue(LOOP_LENGTH_VALUES, looper.loopLength);
+    setLoopLength(nextLoopLength);
+    void dispatchIntent({ name: "setLoopLength", bars: nextLoopLength });
+  }, [dispatchIntent, looper.loopLength, setLoopLength]);
+
+  const updateTimeSignature = React.useCallback((nextBeatsPerMeasure, nextNoteLength) => {
+    setTimeSignature(nextBeatsPerMeasure, nextNoteLength);
+    void dispatchIntent({
+      name: "setTimeSignature",
+      beatsPerMeasure: nextBeatsPerMeasure,
+      noteLength: nextNoteLength,
+    });
+  }, [dispatchIntent, setTimeSignature]);
+
+  const cycleBeatsPerMeasure = React.useCallback(() => {
+    updateTimeSignature(
+      cycleValue(BEATS_PER_MEASURE_VALUES, beatsPerMeasure),
+      noteLength
+    );
+  }, [beatsPerMeasure, noteLength, updateTimeSignature]);
+
+  const cycleNoteLength = React.useCallback(() => {
+    updateTimeSignature(
+      beatsPerMeasure,
+      cycleValue(NOTE_LENGTH_VALUES, noteLength)
+    );
+  }, [beatsPerMeasure, noteLength, updateTimeSignature]);
+
+  const exitAutomationMode = React.useCallback(() => {
+    setIsRecording(false);
+    setIsPlaying(false);
+    setAutomationDurationMs(0);
+    setAutomationPositionMs(0);
+    recordingStartRef.current = null;
+    playbackStartRef.current = null;
+
+    void (async () => {
+      await dispatchIntent({ name: "clearEnvelopes" });
+      await dispatchIntent({ name: "setUnarm" });
+      await dispatchIntent({ name: "setPerformMode" });
+      modeManager.setMode(RFX_MODES.PERFORM, { dispatch: false, source: "ui" });
+    })();
+  }, [dispatchIntent]);
 
   const handleAutomationControl = React.useCallback((control, value = 127) => {
     if (control === MIDI_CONTROLS.EXPR) {
@@ -262,23 +578,27 @@ export function AutomationView() {
 
     if (value <= 0) return;
 
-    if (control === MIDI_CONTROLS.FS_D) {
-      if (!isRecording) {
-        recordingStartRef.current = performance.now();
-        playbackStartRef.current = null;
-        setAutomationDurationMs(0);
-        setAutomationPositionMs(0);
-        setIsPlaying(false);
-        setIsRecording(true);
-      } else {
-        const duration = Math.max(performance.now() - recordingStartRef.current, AUTOMATION_PREVIEW_TICK_MS);
-        setAutomationDurationMs(duration);
-        setAutomationPositionMs(0);
-        setIsRecording(false);
-        setIsPlaying(true);
-        recordingStartRef.current = null;
-        playbackStartRef.current = performance.now();
-      }
+    if (control === MIDI_CONTROLS.FS_B) {
+      recordingStartRef.current = performance.now();
+      playbackStartRef.current = null;
+      setAutomationDurationMs(0);
+      setAutomationPositionMs(0);
+      setIsPlaying(false);
+      setIsRecording(true);
+      void dispatchIntent({ name: "startAutomationRec" });
+    }
+
+    if (control === MIDI_CONTROLS.FS_B_RELEASE) {
+      const duration = recordingStartRef.current
+        ? Math.max(performance.now() - recordingStartRef.current, AUTOMATION_PREVIEW_TICK_MS)
+        : automationDurationMs;
+      setAutomationDurationMs(duration);
+      setAutomationPositionMs(0);
+      setIsRecording(false);
+      setIsPlaying(false);
+      recordingStartRef.current = null;
+      playbackStartRef.current = null;
+      void dispatchIntent({ name: "stopAutomationRec" });
     }
 
     if (control === MIDI_CONTROLS.FS_A) {
@@ -299,14 +619,15 @@ export function AutomationView() {
       setAutomationPositionMs(0);
       recordingStartRef.current = null;
       playbackStartRef.current = null;
+      void dispatchIntent({ name: "clearEnvelopes" });
     }
 
     if (control === AUTOMATION_GESTURES.FS_C_LONG) {
-      modeManager.setMode(RFX_MODES.PERFORM, { source: "ui" });
+      exitAutomationMode();
     }
 
     if (MOMENTARY_CONTROLS.has(control)) flashControl(control);
-  }, [activateExpression, automationDurationMs, flashControl, isRecording]);
+  }, [activateExpression, automationDurationMs, dispatchIntent, exitAutomationMode, flashControl]);
 
   const pressAutomationControl = React.useCallback((control) => {
     handleAutomationControl(control, 127);
@@ -338,9 +659,10 @@ export function AutomationView() {
         return;
       }
 
+      if (command === "AUTOMATION_START_RECORD") handleAutomationControl(MIDI_CONTROLS.FS_B);
+      if (command === "AUTOMATION_STOP_RECORD") handleAutomationControl(MIDI_CONTROLS.FS_B_RELEASE);
       if (command === "AUTOMATION_PLAY_OR_STOP") handleAutomationControl(MIDI_CONTROLS.FS_A);
       if (command === "AUTOMATION_CLEAR") handleAutomationControl(AUTOMATION_GESTURES.FS_A_LONG);
-      if (command === "AUTOMATION_RECORD_OR_FINISH") handleAutomationControl(MIDI_CONTROLS.FS_D);
       if (command === "EXIT_AUTOMATION_MODE") handleAutomationControl(AUTOMATION_GESTURES.FS_C_LONG);
     };
 
@@ -359,6 +681,11 @@ export function AutomationView() {
         window.clearTimeout(expressionTimerRef.current);
         expressionTimerRef.current = null;
       }
+
+      if (tapTempoTimerRef.current) {
+        window.clearTimeout(tapTempoTimerRef.current);
+        tapTempoTimerRef.current = null;
+      }
     };
   }, []);
 
@@ -376,13 +703,32 @@ export function AutomationView() {
         <Panel className="flex-1 min-h-0">
           <div className="p-4 h-full min-h-0">
             <Inset className="h-full min-h-0 p-4">
-              <div className="grid h-full min-h-0 grid-cols-[repeat(4,minmax(0,1fr))_minmax(190px,0.75fr)] grid-rows-[minmax(0,1fr)_auto_auto] gap-3">
+              <div className="flex h-full min-h-0 flex-col gap-3">
+                <AutomationSessionControls
+                  tempoBpm={tempoBpm}
+                  isTapTempoActive={isTapTempoActive}
+                  onTapTempo={handleTapTempo}
+                  clickEnabled={clickEnabled}
+                  onToggleClick={toggleClick}
+                  countInEnabled={countInEnabled}
+                  onToggleCountIn={toggleCountIn}
+                  loopLengthEnabled={looper.loopLengthEnabled}
+                  loopLength={looper.loopLength}
+                  onToggleLoopLength={toggleLoopLength}
+                  onCycleLoopLength={cycleLoopLength}
+                  beatsPerMeasure={beatsPerMeasure}
+                  noteLength={noteLength}
+                  onCycleBeatsPerMeasure={cycleBeatsPerMeasure}
+                  onCycleNoteLength={cycleNoteLength}
+                />
+
+                <div className="grid flex-1 h-full min-h-0 grid-cols-[repeat(4,minmax(0,1fr))_minmax(190px,0.75fr)] grid-rows-[minmax(0,1fr)_auto_auto] gap-3">
                 <div className="col-span-5 row-span-1 min-h-0">
                   <AutomationWorkspace
                     parameters={automatableParameters}
                     armedParameters={armedAutomationParameters}
                     onRemove={removeAutomatableParameter}
-                    onToggleArmed={toggleArmedAutomationParameter}
+                    onToggleArmed={toggleAutomationParameterEnvelope}
                   />
                 </div>
 
@@ -441,16 +787,17 @@ export function AutomationView() {
                       id={sliderKnobId}
                       label="Value"
                       value={automationValue}
-                      mapped={sliderTargets.length > 0}
-                      mappedLabel={mappedLabel}
+                      mapped={automationExpressionTargets.length > 0}
+                      mappedLabel={automationExpressionLabel}
                       onChange={activateExpression}
-                      onCommit={() => {}}
+                      onCommit={commitExpression}
                     />
                   </div>
 
                   <div className="mt-1 text-center text-2xl font-bold tabular-nums text-white">
                     {formatAutomationValue(automationValue)}
                   </div>
+                </div>
                 </div>
               </div>
             </Inset>

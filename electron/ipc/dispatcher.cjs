@@ -111,6 +111,9 @@ function makePayload(call) {
     case "setAutomationMode":
     case "setTunerMode":
     case "exitTunerMode":
+    case "startAutomationRec":
+    case "stopAutomationRec":
+    case "clearEnvelopes":
       return {};
 
     case "setLooperMode":
@@ -193,6 +196,24 @@ function makePayload(call) {
         paramIdx: Number(call.paramIdx),
         value01: clamp01(call.value01 ?? call.value),
       };
+
+    case "setArm":
+    case "setUnarm": {
+      if (!call.fxGuid && !call.trackGuid && !call.trackId && call.paramIdx == null && call.paramIndex == null) {
+        return {};
+      }
+
+      const paramIdx = Number(call.paramIdx ?? call.paramIndex);
+      return {
+        trackGuid: normTrackId(call.trackGuid || call.trackId),
+        fxGuid: asStr(call.fxGuid, ""),
+        paramIdx,
+        paramIndex: paramIdx,
+        paramName: asStr(call.paramName, ""),
+        fxName: asStr(call.fxName, ""),
+        trackName: asStr(call.trackName, ""),
+      };
+    }
 
     case "setTempo":
       return {

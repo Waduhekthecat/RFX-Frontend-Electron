@@ -420,6 +420,20 @@ export class MidiCommandBridge {
         }
 
         switch (control) {
+            case MIDI_CONTROLS.FS_B:
+                this.dispatchCommand("AUTOMATION_START_RECORD", {
+                    source: "midi",
+                    control,
+                });
+                break;
+
+            case MIDI_CONTROLS.FS_B_RELEASE:
+                this.dispatchCommand("AUTOMATION_STOP_RECORD", {
+                    source: "midi",
+                    control,
+                });
+                break;
+
             case MIDI_CONTROLS.FS_A:
                 this.dispatchCommand("AUTOMATION_PLAY_OR_STOP", {
                     source: "midi",
@@ -436,13 +450,6 @@ export class MidiCommandBridge {
 
             case MIDI_GESTURES.FS_B_LONG:
                 console.log("[MIDI] FS_B long not assigned yet");
-                break;
-
-            case MIDI_CONTROLS.FS_D:
-                this.dispatchCommand("AUTOMATION_RECORD_OR_FINISH", {
-                    source: "midi",
-                    control,
-                });
                 break;
 
             case MIDI_GESTURES.FS_C_LONG:

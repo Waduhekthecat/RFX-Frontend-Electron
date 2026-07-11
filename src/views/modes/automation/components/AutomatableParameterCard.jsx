@@ -1,5 +1,12 @@
 import React from "react";
 
+function formatPluginName(name = "") {
+  return String(name)
+    .replace(/^\s*(vst3?|au|clap|js|dx):\s*/i, "")
+    .replace(/\s*\([^)]*\)\s*$/g, "")
+    .trim();
+}
+
 export function AutomatableParameterCard({
   parameter,
   onRemove,
@@ -19,14 +26,9 @@ export function AutomatableParameterCard({
           <div className="truncate text-sm font-semibold text-white">
             {parameter.paramName || `Parameter ${parameter.paramIndex}`}
           </div>
-          {armed ? (
-            <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-200/80">
-              Armed
-            </div>
-          ) : null}
           {parameter.fxName ? (
             <div className="mt-2 truncate text-xs text-white/55">
-              {parameter.fxName}
+              {formatPluginName(parameter.fxName)}
             </div>
           ) : null}
           {parameter.trackName ? (
@@ -40,7 +42,7 @@ export function AutomatableParameterCard({
           <button
             type="button"
             onClick={() => onRemove(parameter)}
-            className="rounded-lg border border-red-300/20 bg-red-400/5 px-2.5 py-1.5 text-[10px] font-semibold text-red-100/80 hover:border-red-300/40 hover:bg-red-400/15"
+            className="flex h-10 w-[68px] items-center justify-center rounded-xl border border-red-300/20 bg-red-400/5 px-3 text-[10px] font-semibold text-red-100/80 transition-colors hover:border-red-300/40 hover:bg-red-400/15"
           >
             REMOVE
           </button>
@@ -49,7 +51,7 @@ export function AutomatableParameterCard({
             type="button"
             onClick={() => onToggleArmed(parameter)}
             aria-pressed={armed}
-            className={`flex h-10 w-full items-center justify-center rounded-xl border px-3 text-[11px] font-semibold transition-colors ${
+            className={`flex h-10 w-[68px] items-center justify-center rounded-xl border px-3 text-[11px] font-semibold transition-colors ${
               armed
                 ? "border-emerald-300/35 bg-emerald-500/15 text-emerald-100"
                 : "border-cyan-300/45 bg-cyan-500/15 text-cyan-100 shadow-[0_0_0_1px_rgba(34,211,238,0.25)] hover:bg-cyan-500/25"
@@ -57,7 +59,7 @@ export function AutomatableParameterCard({
             title={armed ? "Disarm automation parameter" : "Arm automation parameter"}
             aria-label={armed ? "Disarm automation parameter" : "Arm automation parameter"}
           >
-            ARM
+            {armed ? "UNARM" : "ARM"}
           </button>
         </div>
       </div>

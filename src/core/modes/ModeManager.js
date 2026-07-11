@@ -30,7 +30,7 @@ export class ModeManager {
 
   setMode(
     nextMode,
-    { dispatchIfUnchanged = false, source = "unknown" } = {}
+    { dispatch = true, dispatchIfUnchanged = false, source = "unknown" } = {}
   ) {
     if (!Object.values(RFX_MODES).includes(nextMode)) {
       console.warn("Invalid RFX mode:", nextMode);
@@ -38,7 +38,7 @@ export class ModeManager {
     }
 
     if (this.currentMode === nextMode) {
-      if (dispatchIfUnchanged) {
+      if (dispatch && dispatchIfUnchanged) {
         const intentName = MODE_INTENT_BY_MODE[nextMode];
         if (intentName && this.dispatchIntent) {
           void this.dispatchIntent({ name: intentName });
@@ -51,7 +51,7 @@ export class ModeManager {
     this.currentMode = nextMode;
 
     const intentName = MODE_INTENT_BY_MODE[nextMode];
-    if (intentName && this.dispatchIntent) {
+    if (dispatch && intentName && this.dispatchIntent) {
       this.pendingMode = {
         mode: nextMode,
         afterSeq: this.lastViewModelSeq,
@@ -64,7 +64,7 @@ export class ModeManager {
       currentMode: nextMode,
       intentName: intentName || null,
       source,
-      status: intentName ? "pending" : "local",
+      status: dispatch && intentName ? "pending" : "local",
     });
   }
 

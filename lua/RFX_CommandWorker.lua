@@ -1309,6 +1309,448 @@ local function exec_setParamValue(payload)
   return true
 end
 
+local function set_chunk_line(chunk, prefix, replacement)
+  local lines = {}
+  local replaced = false
+  local normalized = tostring(chunk or ""):gsub("\r\n", "\n"):gsub("\r", "\n")
+  if normalized:sub(-1) ~= "\n" then
+    normalized = normalized .. "\n"
+  end
+
+  for line in normalized:gmatch("([^\n]*)\n") do
+    if not replaced and line:match("^%s*" .. prefix .. "%s") then
+      lines[#lines + 1] = replacement
+      replaced = true
+    else
+      lines[#lines + 1] = line
+    end
+  end
+
+  if not replaced then
+    local insertAt = math.min(2, #lines + 1)
+    table.insert(lines, insertAt, replacement)
+  end
+
+  return table.concat(lines, "\n") .. "\n"
+end
+
+local function envelope_chunk_flag(chunk, prefix)
+  local normalized = tostring(chunk or ""):gsub("\r\n", "\n"):gsub("\r", "\n")
+  if normalized:sub(-1) ~= "\n" then
+    normalized = normalized .. "\n"
+  end
+
+  for line in normalized:gmatch("([^\n]*)\n") do
+    local value = line:match("^%s*" .. prefix .. "%s+([%-%d%.]+)")
+    if value ~= nil then
+      return tonumber(value) or 0
+    end
+  end
+
+  return 0
+end
+
+local function clear_envelope_points(envelope)
+  if not envelope then
+    return false
+  end
+
+  reaper.DeleteEnvelopePointRange(envelope, -1000000000, 1000000000)
+
+  if reaper.CountAutomationItems and reaper.DeleteEnvelopePointRangeEx then
+    local itemCount = reaper.CountAutomationItems(envelope) or 0
+    for itemIdx = itemCount - 1, 0, -1 do
+      reaper.DeleteEnvelopePointRangeEx(envelope, itemIdx, -1000000000, 1000000000)
+    end
+  end
+
+  reaper.Envelope_SortPoints(envelope)
+  return true
+end
+
+local function clear_if_envelope_armed(envelope)
+  if not envelope then
+    return false
+  end
+
+  local okChunk, chunk = reaper.GetEnvelopeStateChunk(envelope, "", false)
+  if not okChunk or not chunk then
+    return false
+  end
+
+  if envelope_chunk_flag(chunk, "ARM") ~= 1 then
+    return false
+  end
+
+  return clear_envelope_points(envelope)
+end
+
+local function exec_clearEnvelopes(_payload)
+  local clearedCount = 0
+  local trackCount = reaper.CountTracks(0)
+
+  for trackIdx = 0, trackCount - 1 do
+    local tr = reaper.GetTrack(0, trackIdx)
+    local envelopeCount = reaper.CountTrackEnvelopes(tr) or 0
+
+    for envelopeIdx = 0, envelopeCount - 1 do
+      local envelope = reaper.GetTrackEnvelope(tr, envelopeIdx)
+      if clear_if_envelope_armed(envelope) then
+        clearedCount = clearedCount + 1
+      end
+    end
+  end
+
+  local master = reaper.GetMasterTrack(0)
+  if master then
+    local masterEnvelopeCount = reaper.CountTrackEnvelopes(master) or 0
+    for envelopeIdx = 0, masterEnvelopeCount - 1 do
+      local envelope = reaper.GetTrackEnvelope(master, envelopeIdx)
+      if clear_if_envelope_armed(envelope) then
+        clearedCount = clearedCount + 1
+      end
+    end
+  end
+
+  reaper.GetSet_LoopTimeRange(true, false, 0, 0, false)
+  reaper.UpdateArrange()
+  reaper_log("state", "clearEnvelopes", {
+    clearedCount = clearedCount,
+    timeSelectionCleared = true,
+  })
+  request_vm_export("clearEnvelopes")
+
+  return true, nil, {
+    clearedCount = clearedCount,
+    timeSelectionCleared = true,
+  }
+end
+
+local function reset_envelope_inactive_hidden_unarmed(envelope)
+  if not envelope then
+    return false
+  end
+
+  local okChunk, chunk = reaper.GetEnvelopeStateChunk(envelope, "", false)
+  if not okChunk or not chunk then
+    return false
+  end
+
+  chunk = set_chunk_line(chunk, "ACT", "ACT 0 -1")
+  chunk = set_chunk_line(chunk, "VIS", "VIS 0 1 1")
+  chunk = set_chunk_line(chunk, "ARM", "ARM 0")
+
+  return reaper.SetEnvelopeStateChunk(envelope, chunk, false) == true
+end
+
+local function reset_track_automation_defaults(track)
+  if not track then
+    return 0
+  end
+
+  local resetCount = 0
+  local envelopeCount = reaper.CountTrackEnvelopes(track) or 0
+
+  for envelopeIdx = 0, envelopeCount - 1 do
+    local envelope = reaper.GetTrackEnvelope(track, envelopeIdx)
+    if reset_envelope_inactive_hidden_unarmed(envelope) then
+      resetCount = resetCount + 1
+    end
+  end
+
+  reaper.SetTrackAutomationMode(track, 0)
+  return resetCount
+end
+
+local function reset_all_automation_defaults_at_startup()
+  local resetCount = 0
+  local trackCount = reaper.CountTracks(0)
+
+  for trackIdx = 0, trackCount - 1 do
+    resetCount = resetCount +
+      reset_track_automation_defaults(reaper.GetTrack(0, trackIdx))
+  end
+
+  local master = reaper.GetMasterTrack(0)
+  resetCount = resetCount +
+    reset_track_automation_defaults(master)
+
+  reaper.TrackList_AdjustWindows(false)
+  reaper.UpdateArrange()
+
+  reaper_log("state", "resetAutomationDefaults", {
+    resetCount = resetCount,
+    tracks = trackCount,
+    masterIncluded = master ~= nil,
+    automationModeValue = 0,
+  })
+
+  return true, resetCount
+end
+
+local function track_has_armed_envelopes(track)
+  if not track then
+    return false
+  end
+
+  local envelopeCount = reaper.CountTrackEnvelopes(track)
+
+  for envelopeIndex = 0, envelopeCount - 1 do
+    local envelope =
+      reaper.GetTrackEnvelope(track, envelopeIndex)
+
+    if envelope then
+      local armed =
+        reaper.GetEnvelopeInfo_Value(
+          envelope,
+          "B_ARM"
+        )
+
+      if armed and armed > 0.5 then
+        return true
+      end
+
+      local okChunk, chunk =
+        reaper.GetEnvelopeStateChunk(
+          envelope,
+          "",
+          false
+        )
+
+      if okChunk and chunk and
+        envelope_chunk_flag(chunk, "ARM") == 1 then
+        return true
+      end
+    end
+  end
+
+  return false
+end
+
+local function restore_track_automation_mode_for_envelopes(track)
+  if not track then
+    return false, nil
+  end
+
+  local hasArmedEnvelopes =
+    track_has_armed_envelopes(track)
+
+  -- REAPER automation mode is track-wide. If any envelope
+  -- is still armed, the whole track must remain in Touch.
+  reaper.SetTrackAutomationMode(
+    track,
+    hasArmedEnvelopes and 2 or 0
+  )
+
+  return hasArmedEnvelopes,
+    reaper.GetTrackAutomationMode(track)
+end
+
+local function set_parameter_envelope_state(payload, enabled)
+  local fxGuid = tostring(payload.fxGuid or "")
+  local paramIdx =
+    tonumber(payload.paramIdx or payload.paramIndex)
+
+  if fxGuid == "" then
+    return false, "missing fxGuid"
+  end
+
+  if paramIdx == nil then
+    return false, "missing paramIdx"
+  end
+
+  paramIdx = math.floor(paramIdx)
+
+  local tr, fxIndex =
+    find_track_and_fx_index_by_fx_guid(fxGuid)
+
+  if not tr or fxIndex == nil then
+    return false, "fx not found: " .. fxGuid
+  end
+
+  local paramCount =
+    reaper.TrackFX_GetNumParams(tr, fxIndex)
+
+  if paramIdx < 0 or paramIdx >= paramCount then
+    return false,
+      "paramIdx out of range: " ..
+      tostring(paramIdx)
+  end
+
+  local envelope = reaper.GetFXEnvelope(
+    tr,
+    fxIndex,
+    paramIdx,
+    enabled
+  )
+
+  if not envelope then
+    if enabled then
+      return false,
+        "failed to create parameter envelope"
+    end
+
+    local trackHasArmedEnvelopes,
+      automationMode =
+      restore_track_automation_mode_for_envelopes(tr)
+
+    reaper_log("state", "setUnarm", {
+      fxGuid = fxGuid,
+      paramIdx = paramIdx,
+      envelopeFound = false,
+      trackHasArmedEnvelopes =
+        trackHasArmedEnvelopes,
+      automationModeValue = automationMode,
+    })
+
+    request_vm_export("setUnarm")
+    return true
+  end
+
+  local okChunk, chunk =
+    reaper.GetEnvelopeStateChunk(
+      envelope,
+      "",
+      false
+    )
+
+  if not okChunk or not chunk then
+    return false,
+      "failed to read parameter envelope chunk"
+  end
+
+  local active = enabled and 1 or 0
+  local visible = enabled and 1 or 0
+  local armed = enabled and 1 or 0
+
+  chunk = set_chunk_line(
+    chunk,
+    "ACT",
+    "ACT " .. tostring(active) .. " -1"
+  )
+
+  chunk = set_chunk_line(
+    chunk,
+    "VIS",
+    "VIS " .. tostring(visible) .. " 1 1"
+  )
+
+  chunk = set_chunk_line(
+    chunk,
+    "ARM",
+    "ARM " .. tostring(armed)
+  )
+
+  local okSet =
+    reaper.SetEnvelopeStateChunk(
+      envelope,
+      chunk,
+      false
+    )
+
+  if not okSet then
+    return false,
+      "failed to write parameter envelope chunk"
+  end
+
+  local trackHasArmedEnvelopes =
+    nil
+  local automationMode =
+    nil
+
+  if enabled then
+    reaper.SetTrackAutomationMode(tr, 2)
+    trackHasArmedEnvelopes = true
+    automationMode = reaper.GetTrackAutomationMode(tr)
+  else
+    trackHasArmedEnvelopes,
+      automationMode =
+      restore_track_automation_mode_for_envelopes(tr)
+  end
+
+  reaper.TrackList_AdjustWindows(false)
+  reaper.UpdateArrange()
+
+  reaper_log(
+    "state",
+    enabled and "setArm" or "setUnarm",
+    {
+      fxGuid = fxGuid,
+      fxIndex = fxIndex,
+      paramIdx = paramIdx,
+      active = active,
+      visible = visible,
+      armed = armed,
+      trackHasArmedEnvelopes =
+        trackHasArmedEnvelopes,
+      automationModeValue = automationMode,
+    }
+  )
+
+  request_vm_export(
+    enabled and "setArm" or "setUnarm"
+  )
+
+  return true, nil, {
+    fxGuid = fxGuid,
+    fxIndex = fxIndex,
+    paramIdx = paramIdx,
+    active = active,
+    visible = visible,
+    armed = armed,
+    trackHasArmedEnvelopes =
+      trackHasArmedEnvelopes,
+    automationModeValue = automationMode,
+  }
+end
+
+local function exec_setArm(payload)
+  return set_parameter_envelope_state(
+    payload,
+    true
+  )
+end
+
+local function exec_setUnarm(payload)
+  return set_parameter_envelope_state(
+    payload,
+    false
+  )
+end
+
+local function exec_startAutomationRec(_payload)
+  reaper.SetEditCurPos(0, true, false)
+  reaper.OnPlayButton()
+  reaper_log("state", "startAutomationRec", {
+    position = 0,
+    playing = true,
+  })
+  request_vm_export("startAutomationRec")
+  return true
+end
+
+local function exec_stopAutomationRec(_payload)
+  local selectionEnd = tonumber(reaper.GetPlayPosition()) or 0
+  if selectionEnd <= 0 then
+    selectionEnd = tonumber(reaper.GetCursorPosition()) or 0
+  end
+  if selectionEnd < 0 then
+    selectionEnd = 0
+  end
+
+  reaper.OnStopButton()
+  reaper.GetSet_LoopTimeRange(true, false, 0, selectionEnd, false)
+  reaper.SetEditCurPos(0, true, false)
+  reaper_log("state", "stopAutomationRec", {
+    position = 0,
+    selectionStart = 0,
+    selectionEnd = selectionEnd,
+    playing = false,
+  })
+  request_vm_export("stopAutomationRec")
+  return true
+end
+
 local function exec_refreshInstalledPlugins(_payload)
   local ok = installedExporter.export_installed_plugins()
   if not ok then
@@ -1655,6 +2097,16 @@ local function execute_command(cmd)
     return exec_getPluginParams(payload)
   elseif name == "setParamValue" then
     return exec_setParamValue(payload)
+  elseif name == "setArm" then
+    return exec_setArm(payload)
+  elseif name == "setUnarm" then
+    return exec_setUnarm(payload)
+  elseif name == "startAutomationRec" then
+    return exec_startAutomationRec(payload)
+  elseif name == "stopAutomationRec" then
+    return exec_stopAutomationRec(payload)
+  elseif name == "clearEnvelopes" then
+    return exec_clearEnvelopes(payload)
   elseif name == "refreshInstalledPlugins" then
     return exec_refreshInstalledPlugins(payload)
   elseif name == "setTempo" then
@@ -1822,6 +2274,17 @@ do
     log_debug("routing state applied at startup")
   else
     log_error("startup routing apply failed: " .. tostring(errRouting or "unknown"))
+  end
+
+  local okAutomationDefaults, resetEnvelopeCount =
+    reset_all_automation_defaults_at_startup()
+  if okAutomationDefaults then
+    log_debug(
+      "automation defaults reset at startup envelopes=" ..
+      tostring(resetEnvelopeCount or 0)
+    )
+  else
+    log_error("startup automation defaults reset failed")
   end
 
   local okVm = exporter.export_vm()
