@@ -10,7 +10,6 @@ const { initMidiMain, closeMidiMain } = require("./midi/midiMain.cjs");
 
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
 const IS_DEV = !!DEV_SERVER_URL;
-const IPC_DIR = "/tmp/rfx-ipc";
 
 const { dispatchCmdJson } = require("./ipc/dispatcher.cjs");
 const { createIpcWatchers } = require("./ipc/watchers.cjs");
@@ -87,7 +86,7 @@ function ensureOscPort() {
 
 function getCurrentAppMode() {
   try {
-    const statePath = path.join(IPC_DIR, "state.json");
+    const statePath = path.join("/tmp/rfx-ipc", "state.json");
     if (!fs.existsSync(statePath)) return "perform";
 
     const raw = fs.readFileSync(statePath, "utf8");
@@ -138,9 +137,8 @@ function ensureOscListener() {
         const octaveText = Number.isFinite(octaveValue) ? String(octaveValue) : "";
         const centsValue = Number(cents);
 
-        const centsText = `${
-          Number.isFinite(centsValue) && centsValue >= 0 ? "+" : ""
-        }${Number.isFinite(centsValue) ? centsValue.toFixed(1) : "0.0"}¢`;
+        const centsText = `${Number.isFinite(centsValue) && centsValue >= 0 ? "+" : ""
+          }${Number.isFinite(centsValue) ? centsValue.toFixed(1) : "0.0"}¢`;
 
         safeSend("rfx:tuner", {
           hasPitch: 1,
@@ -553,11 +551,16 @@ async function bootIpc() {
       liveInstalledFx = Array.isArray(nextInstalledFx) ? nextInstalledFx : [];
       safeSend("rfx:installedFx", liveInstalledFx);
     },
+
+    onTuner(nextTuner) {
+      safeSend("rfx:tuner", nextTuner);
+    },
   });
 
   await watchers.start();
   await watchers.refreshVm().catch(() => { });
   await watchers.refreshCmdResult().catch(() => { });
+  await watchers.refreshTuner?.().catch(() => {});
 
   liveInstalledFx = await readInstalledFxSnapshot().catch(() => []);
 
@@ -571,23 +574,6 @@ ipcMain.handle("rfx:getInstalledFx", async () => Array.isArray(liveInstalledFx) 
 ipcMain.handle("rfx:getBootState", async () => ({ ok: true, bootState, reaperReady }));
 ipcMain.handle("rfx:syscall", async (_evt, call) => dispatchCmdJson(call));
 ipcMain.handle("rfx:sendOsc", async (_evt, packet) => sendOscPacket(packet));
-ipcMain.handle("rfx:tuner:read", async () => {
-  try {
-    const raw = await fsp.readFile(path.join(IPC_DIR, "tuner.json"), "utf8");
-    return JSON.parse(raw);
-  } catch {
-    return {
-      hasPitch: false,
-      note: "--",
-      octave: "",
-      cents: 0,
-      direction: 0,
-      confidence: 0,
-      bendCentered: false,
-      stale: true,
-    };
-  }
-});
 ipcMain.handle("rfx:setLooperInputGain", async (_evt, payload) => {
   const value = Number(payload?.value01);
   const value01 = Number.isFinite(value)

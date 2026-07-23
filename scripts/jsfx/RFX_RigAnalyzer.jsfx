@@ -1,0 +1,826 @@
+desc:RFX Rig Analyzer
+options:gmem=RFX_RIG_ANALYZER
+
+slider1:0<0,1,1{Idle,Measure}>Manual Pass Control
+slider2:0<-24,24,0.1>Candidate Input Gain (dB)
+slider3:0<0,1,1{Ready,Reset Session}>Reset Session
+slider4:0<0,1,1{Automatic,Calculate Recommendation}>Recommendation
+slider5:0<0,1,1{Active,Bypassed}>Bypass
+
+// Post-rig measurement and provisional operating-point analyzer.
+// Audio is always exact stereo pass-through. gmem commands are authoritative;
+// sliders exist only for manual debugging.
+//
+// Fixed local-memory layout (32 unique passes):
+//      0..31   candidate gain dB       256..287 clipped percentage
+//     32..63   maximum peak dBFS       288..319 HF ratio
+//     64..95   P95 peak dBFS           320..351 transient activity
+//     96..127  active RMS dBFS         352..383 pass confidence
+//    128..159  crest factor dB         384..415 pass valid
+//    160..191  active seconds          416..447 analysis stage
+//    192..223  valid windows           448..479 recommendation score
+//    224..255  clipped flag            480..511 sorted pass indices
+//    512..3511 window-peak scratch (3,000 values; 30 seconds at 10 ms)
+// Sorting never overwrites stored pass results and never runs in @sample.
+//
+// gmem protocol version 1:
+//   0 version; 1 command; 2 command sequence; 3 requested candidate dB;
+//   4 analyzer state; 5 event counter; 6 completed sequence; 7 progress;
+//   8 stored valid count; 9..21 last-pass result; 22..31 recommendation;
+//   32 error code; 33 analysis stage.
+// Commands: 0 none, 1 reset, 2 begin pass, 3 cancel, 4 finalize,
+//           5 analyze current results, 6 calculate final recommendation.
+// States: 0 idle, 1 measuring, 2 pass complete, 3 pass invalid,
+//         4 stage ready, 5 recommendation ready, 6 unavailable,
+//         7 cancelled, 8 error.
+
+@init
+PROTOCOL_VERSION = 1;
+
+CMD_NONE = 0; CMD_RESET = 1; CMD_BEGIN = 2; CMD_CANCEL = 3;
+CMD_FINALIZE = 4; CMD_ANALYZE = 5; CMD_RECOMMEND = 6;
+
+STATE_IDLE = 0; STATE_MEASURING = 1; STATE_PASS_COMPLETE = 2;
+STATE_PASS_INVALID = 3; STATE_STAGE_READY = 4; STATE_RECOMMENDATION_READY = 5;
+STATE_RECOMMENDATION_UNAVAILABLE = 6; STATE_CANCELLED = 7; STATE_ERROR = 8;
+
+STAGE_NONE = 0; STAGE_COARSE = 1; STAGE_FINE = 2;
+STAGE_PRECISION = 3; STAGE_FINAL = 4;
+
+ERR_NONE = 0; ERR_BYPASSED = 1; ERR_NOT_MEASURING = 2;
+ERR_INSUFFICIENT_SIGNAL = 3; ERR_WINDOW_OVERFLOW = 4;
+ERR_PASS_TIMEOUT = 5; ERR_NOT_ENOUGH_PASSES = 6;
+ERR_NO_SAFE_RECOMMENDATION = 7; ERR_SAMPLE_RATE_CHANGED = 8;
+ERR_STORAGE_FULL = 9;
+
+MAX_PASSES = 32;
+GAIN_BASE = 0; MAX_PEAK_BASE = 32; P95_BASE = 64; RMS_BASE = 96;
+CREST_BASE = 128; ACTIVE_BASE = 160; WINDOWS_BASE = 192;
+CLIPPED_BASE = 224; CLIP_PERCENT_BASE = 256; HF_BASE = 288;
+TRANSIENT_BASE = 320; CONFIDENCE_BASE = 352; VALID_BASE = 384;
+STAGE_BASE = 416; SCORE_BASE = 448; SORT_INDEX_BASE = 480;
+WINDOW_BASE = 512; WINDOW_CAPACITY = 3000;
+
+DB_FLOOR = -120;
+SILENCE_DB = -60;
+CLIP_THRESHOLD = 0.9995;
+MIN_VALID_WINDOWS = 20;
+MIN_ACTIVE_SECONDS = 0.25;
+WARMUP_SECONDS = 0.100;
+MAX_PASS_SECONDS = 25;
+DUPLICATE_GAIN_EPSILON = 0.05;
+MIN_RECOMMENDATION_PASSES = 5;
+
+// Pass-confidence weights describe measurement reliability, never tone quality.
+PASS_CONF_WINDOWS = 45;
+PASS_CONF_ACTIVE = 25;
+PASS_CONF_NORMAL_COMPLETION = 20;
+PASS_CONF_NO_CLIP = 10;
+
+// Recommendation constants. A knee is a supported region whose output-RMS
+// slope has fallen below near-linear growth without reaching a hard plateau.
+KNEE_SLOPE_HIGH = 0.85;
+KNEE_SLOPE_LOW = 0.15;
+TARGET_KNEE_SLOPE = 0.65;
+ABRUPT_CREST_DROP_DB = 5;
+TRANSIENT_COLLAPSE_RATIO = 0.60;
+HF_ABRUPT_RATIO = 1.35;
+LOW_PASS_SCORE_CONFIDENCE = 55;
+NEAR_TIE_SCORE = 8;
+
+PI = 3.141592653589793;
+log10_value = log(10);
+silence_threshold = exp(log10_value * SILENCE_DB / 20);
+
+cached_srate = max(1, srate);
+window_samples = max(1, floor(cached_srate * 0.010 + 0.5));
+warmup_samples = max(1, floor(cached_srate * WARMUP_SECONDS + 0.5));
+max_pass_samples = max(1, floor(cached_srate * MAX_PASS_SECONDS + 0.5));
+lowpass_alpha = 1 - exp(-2 * PI * 4000 / cached_srate);
+fast_env_coeff = exp(-1 / (0.005 * cached_srate));
+slow_env_coeff = exp(-1 / (0.050 * cached_srate));
+
+analyzer_state = STATE_IDLE;
+analysis_stage = STAGE_NONE;
+event_counter = 0;
+completed_sequence = 0;
+last_command_sequence = -1;
+error_code = ERR_NONE;
+stored_pass_count = 0;
+measuring = 0;
+finalize_pending = 0;
+timeout_pending = 0;
+analysis_pending = 0;
+analysis_final = 0;
+pass_progress = 0;
+
+last_pass_valid = 0;
+last_pass_candidate = 0;
+last_pass_rms_db = DB_FLOOR;
+last_pass_crest_db = 0;
+last_pass_p95_db = DB_FLOOR;
+last_pass_max_db = DB_FLOOR;
+last_pass_hf_ratio = 0;
+last_pass_transient = 0;
+last_pass_clipped = 0;
+last_pass_clip_percent = 0;
+last_pass_confidence = 0;
+last_pass_active_seconds = 0;
+last_pass_valid_windows = 0;
+
+recommended_gain = 0;
+recommendation_score = 0;
+recommendation_confidence = 0;
+clear_knee = 0;
+refinement_low = 0;
+refinement_high = 0;
+refinement_step = 1;
+refinement_requested = 0;
+winning_candidate_index = -1;
+second_best_difference = 0;
+
+previous_manual_measure = slider1;
+previous_manual_reset = slider3;
+previous_manual_recommend = slider4;
+previous_bypass = slider5;
+manual_sequence = 1000000;
+serialized_needs_validation = 0;
+
+gmem[0] = PROTOCOL_VERSION;
+gmem[1] = CMD_NONE;
+gmem[4] = analyzer_state;
+gmem[5] = event_counter;
+gmem[6] = completed_sequence;
+gmem[7] = 0;
+gmem[8] = 0;
+gmem[32] = ERR_NONE;
+gmem[33] = STAGE_NONE;
+
+@slider
+// Manual controls emit the same sequenced commands as Lua, for debugging only.
+slider5 >= 0.5 && previous_bypass < 0.5 && measuring ? (
+  measuring = 0;
+  finalize_pending = 0;
+  analyzer_state = STATE_CANCELLED;
+  last_pass_valid = 0;
+  last_pass_confidence = 0;
+  error_code = ERR_BYPASSED;
+  event_counter += 1;
+);
+
+slider3 >= 0.5 && previous_manual_reset < 0.5 ? (
+  manual_sequence += 1;
+  gmem[2] = manual_sequence;
+  gmem[1] = CMD_RESET;
+  slider3 = 0;
+  sliderchange(slider3);
+);
+
+slider1 >= 0.5 && previous_manual_measure < 0.5 ? (
+  manual_sequence += 1;
+  gmem[3] = slider2;
+  gmem[33] = STAGE_NONE;
+  gmem[2] = manual_sequence;
+  gmem[1] = CMD_BEGIN;
+);
+slider1 < 0.5 && previous_manual_measure >= 0.5 && measuring ? (
+  manual_sequence += 1;
+  gmem[2] = manual_sequence;
+  gmem[1] = CMD_FINALIZE;
+);
+
+slider4 >= 0.5 && previous_manual_recommend < 0.5 ? (
+  manual_sequence += 1;
+  gmem[33] = STAGE_FINAL;
+  gmem[2] = manual_sequence;
+  gmem[1] = CMD_RECOMMEND;
+  slider4 = 0;
+  sliderchange(slider4);
+);
+
+previous_manual_measure = slider1;
+previous_manual_reset = slider3;
+previous_manual_recommend = slider4;
+previous_bypass = slider5;
+
+@block
+// Validate restored persistent data once. Active/partial measurement state is
+// never restored by @serialize.
+serialized_needs_validation ? (
+  serialized_needs_validation = 0;
+  stored_pass_count = max(0, min(MAX_PASSES, floor(stored_pass_count + 0.5)));
+  validate_i = 0;
+  while(validate_i < MAX_PASSES) (
+    VALID_BASE[validate_i] = VALID_BASE[validate_i] >= 0.5 ? 1 : 0;
+    GAIN_BASE[validate_i] = max(-24, min(24, GAIN_BASE[validate_i]));
+    CONFIDENCE_BASE[validate_i] = max(0, min(100, CONFIDENCE_BASE[validate_i]));
+    validate_i += 1;
+  );
+  analyzer_state = STATE_IDLE;
+  measuring = finalize_pending = timeout_pending = analysis_pending = 0;
+  error_code = ERR_NONE;
+);
+
+// A sample-rate change invalidates an active pass and rebuilds all timing/filter
+// coefficients. Completed stored passes remain valid comparative measurements.
+abs(srate - cached_srate) > 0.5 ? (
+  measuring || finalize_pending ? (
+    measuring = 0;
+    finalize_pending = 0;
+    analyzer_state = STATE_CANCELLED;
+    last_pass_valid = 0;
+    last_pass_confidence = 0;
+    error_code = ERR_SAMPLE_RATE_CHANGED;
+    event_counter += 1;
+  );
+  cached_srate = max(1, srate);
+  window_samples = max(1, floor(cached_srate * 0.010 + 0.5));
+  warmup_samples = max(1, floor(cached_srate * WARMUP_SECONDS + 0.5));
+  max_pass_samples = max(1, floor(cached_srate * MAX_PASS_SECONDS + 0.5));
+  lowpass_alpha = 1 - exp(-2 * PI * 4000 / cached_srate);
+  fast_env_coeff = exp(-1 / (0.005 * cached_srate));
+  slow_env_coeff = exp(-1 / (0.050 * cached_srate));
+);
+
+// Consume each sequence exactly once. The command cell is cleared after read so
+// Lua can distinguish acceptance from stale shared memory.
+gmem[1] != CMD_NONE ? (
+  incoming_command = floor(gmem[1] + 0.5);
+  incoming_sequence = floor(gmem[2] + 0.5);
+  incoming_candidate = max(-24, min(24, gmem[3]));
+  incoming_stage = max(STAGE_NONE, min(STAGE_FINAL, floor(gmem[33] + 0.5)));
+  gmem[1] = CMD_NONE;
+
+  incoming_sequence != last_command_sequence ? (
+    last_command_sequence = incoming_sequence;
+
+    incoming_command == CMD_RESET ? (
+      measuring = finalize_pending = timeout_pending = analysis_pending = 0;
+      stored_pass_count = 0;
+      reset_i = 0;
+      while(reset_i < MAX_PASSES) (
+        GAIN_BASE[reset_i] = 0; MAX_PEAK_BASE[reset_i] = DB_FLOOR;
+        P95_BASE[reset_i] = DB_FLOOR; RMS_BASE[reset_i] = DB_FLOOR;
+        CREST_BASE[reset_i] = 0; ACTIVE_BASE[reset_i] = 0;
+        WINDOWS_BASE[reset_i] = 0; CLIPPED_BASE[reset_i] = 0;
+        CLIP_PERCENT_BASE[reset_i] = 0; HF_BASE[reset_i] = 0;
+        TRANSIENT_BASE[reset_i] = 0; CONFIDENCE_BASE[reset_i] = 0;
+        VALID_BASE[reset_i] = 0; STAGE_BASE[reset_i] = 0;
+        SCORE_BASE[reset_i] = 0; SORT_INDEX_BASE[reset_i] = 0;
+        reset_i += 1;
+      );
+      last_pass_valid = 0;
+      last_pass_candidate = 0;
+      last_pass_rms_db = last_pass_p95_db = last_pass_max_db = DB_FLOOR;
+      last_pass_crest_db = last_pass_hf_ratio = last_pass_transient = 0;
+      last_pass_clipped = last_pass_clip_percent = last_pass_confidence = 0;
+      last_pass_active_seconds = last_pass_valid_windows = 0;
+      recommended_gain = recommendation_score = recommendation_confidence = 0;
+      clear_knee = refinement_requested = 0;
+      refinement_low = refinement_high = 0; refinement_step = 1;
+      winning_candidate_index = -1; second_best_difference = 0;
+      analysis_stage = STAGE_NONE;
+      analyzer_state = STATE_IDLE;
+      error_code = ERR_NONE;
+      completed_sequence = incoming_sequence;
+      event_counter += 1;
+    );
+
+    incoming_command == CMD_BEGIN ? (
+      slider5 >= 0.5 ? (
+        analyzer_state = STATE_ERROR;
+        error_code = ERR_BYPASSED;
+        completed_sequence = incoming_sequence;
+        event_counter += 1;
+      ) : (
+        current_candidate = incoming_candidate;
+        current_pass_stage = incoming_stage;
+        active_begin_sequence = incoming_sequence;
+        pass_samples = analyzed_samples = active_samples = clipped_samples = 0;
+        window_sample_count = window_peak = valid_window_count = 0;
+        rms_sum_squares = max_peak_linear = 0;
+        hf_energy = total_energy = 0;
+        transient_sum = 0;
+        filter_low = fast_envelope = slow_envelope = 0;
+        window_overflow = timeout_pending = 0;
+        pass_progress = 0;
+        measuring = 1;
+        finalize_pending = 0;
+        normal_completion = 0;
+        analyzer_state = STATE_MEASURING;
+        error_code = ERR_NONE;
+        completed_sequence = incoming_sequence; // Arm acknowledgment.
+        event_counter += 1;
+      );
+    );
+
+    incoming_command == CMD_CANCEL ? (
+      measuring = finalize_pending = timeout_pending = 0;
+      analyzer_state = STATE_CANCELLED;
+      last_pass_valid = 0;
+      last_pass_confidence = 0;
+      error_code = ERR_NONE;
+      completed_sequence = incoming_sequence;
+      event_counter += 1;
+    );
+
+    incoming_command == CMD_FINALIZE ? (
+      measuring ? (
+        measuring = 0;
+        normal_completion = 1;
+        finalize_pending = 1;
+        finalize_sequence = incoming_sequence;
+      ) : (
+        analyzer_state = STATE_ERROR;
+        error_code = ERR_NOT_MEASURING;
+        completed_sequence = incoming_sequence;
+        event_counter += 1;
+      );
+    );
+
+    incoming_command == CMD_ANALYZE || incoming_command == CMD_RECOMMEND ? (
+      measuring ? (
+        analyzer_state = STATE_ERROR;
+        error_code = ERR_NOT_MEASURING;
+        completed_sequence = incoming_sequence;
+        event_counter += 1;
+      ) : (
+        analysis_pending = 1;
+        analysis_final = incoming_command == CMD_RECOMMEND ? 1 : 0;
+        analysis_stage = analysis_final ? STAGE_FINAL : incoming_stage;
+        analysis_sequence = incoming_sequence;
+      );
+    );
+  );
+);
+
+// Pass finalization: derive metrics, sort window peaks, and replace/append the
+// candidate result. A clipped but otherwise valid pass remains usable with a
+// confidence penalty. Timeout, overflow, and insufficient signal are invalid.
+finalize_pending ? (
+  finalize_pending = 0;
+  measuring = 0;
+  pass_progress = 1;
+
+  last_pass_candidate = current_candidate;
+  last_pass_valid_windows = valid_window_count;
+  last_pass_active_seconds = active_samples / cached_srate;
+  last_pass_max_db = max(DB_FLOOR,
+                         20 * log(max(max_peak_linear, 0.000001)) / log10_value);
+  active_samples > 0 ? (
+    pass_rms_linear = sqrt(rms_sum_squares / active_samples);
+    last_pass_rms_db = max(DB_FLOOR,
+                           20 * log(max(pass_rms_linear, 0.000001)) / log10_value);
+    last_pass_transient = transient_sum / active_samples;
+  ) : (
+    last_pass_rms_db = DB_FLOOR;
+    last_pass_transient = 0;
+  );
+  analyzed_samples > 0 ? last_pass_clip_percent = clipped_samples * 100 / analyzed_samples
+                       : last_pass_clip_percent = 0;
+  last_pass_clipped = clipped_samples > 0 ? 1 : 0;
+  last_pass_hf_ratio = total_energy > 0.000000000001 ? hf_energy / total_energy : 0;
+
+  timeout_pending || window_overflow
+  || valid_window_count < MIN_VALID_WINDOWS
+  || last_pass_active_seconds < MIN_ACTIVE_SECONDS ? (
+    last_pass_valid = 0;
+    last_pass_p95_db = DB_FLOOR;
+    last_pass_crest_db = 0;
+    last_pass_confidence = 0;
+    analyzer_state = STATE_PASS_INVALID;
+    timeout_pending ? error_code = ERR_PASS_TIMEOUT
+    : window_overflow ? error_code = ERR_WINDOW_OVERFLOW
+    : error_code = ERR_INSUFFICIENT_SIGNAL;
+  ) : (
+    gap = floor(valid_window_count / 2);
+    while(gap >= 1) (
+      sort_i = gap;
+      while(sort_i < valid_window_count) (
+        sort_value = WINDOW_BASE[sort_i];
+        sort_j = sort_i;
+        while(sort_j >= gap && WINDOW_BASE[sort_j - gap] > sort_value) (
+          WINDOW_BASE[sort_j] = WINDOW_BASE[sort_j - gap];
+          sort_j -= gap;
+        );
+        WINDOW_BASE[sort_j] = sort_value;
+        sort_i += 1;
+      );
+      gap = floor(gap / 2);
+    );
+    percentile_index = max(0, min(valid_window_count - 1,
+                           ceil(valid_window_count * 0.95) - 1));
+    p95_linear = max(WINDOW_BASE[percentile_index], 0.000001);
+    last_pass_p95_db = max(DB_FLOOR, 20 * log(p95_linear) / log10_value);
+    last_pass_crest_db = last_pass_p95_db - last_pass_rms_db;
+
+    last_pass_confidence = min(PASS_CONF_WINDOWS,
+      valid_window_count * PASS_CONF_WINDOWS / MIN_VALID_WINDOWS)
+      + min(PASS_CONF_ACTIVE,
+        last_pass_active_seconds * PASS_CONF_ACTIVE / MIN_ACTIVE_SECONDS)
+      + (normal_completion ? PASS_CONF_NORMAL_COMPLETION : 0)
+      + (last_pass_clipped ? 0 : PASS_CONF_NO_CLIP);
+    last_pass_confidence = max(0, min(100, last_pass_confidence));
+    last_pass_valid = 1;
+    analyzer_state = STATE_PASS_COMPLETE;
+    error_code = ERR_NONE;
+
+    store_index = -1;
+    find_i = 0;
+    while(find_i < stored_pass_count) (
+      VALID_BASE[find_i] >= 0.5
+      && abs(GAIN_BASE[find_i] - current_candidate) <= DUPLICATE_GAIN_EPSILON
+      ? store_index = find_i;
+      find_i += 1;
+    );
+    store_index < 0 ? (
+      stored_pass_count < MAX_PASSES ? (
+        store_index = stored_pass_count;
+        stored_pass_count += 1;
+      ) : (
+        store_index = -1;
+        last_pass_valid = 0;
+        analyzer_state = STATE_ERROR;
+        error_code = ERR_STORAGE_FULL;
+      );
+    );
+    store_index >= 0 ? (
+      GAIN_BASE[store_index] = current_candidate;
+      MAX_PEAK_BASE[store_index] = last_pass_max_db;
+      P95_BASE[store_index] = last_pass_p95_db;
+      RMS_BASE[store_index] = last_pass_rms_db;
+      CREST_BASE[store_index] = last_pass_crest_db;
+      ACTIVE_BASE[store_index] = last_pass_active_seconds;
+      WINDOWS_BASE[store_index] = valid_window_count;
+      CLIPPED_BASE[store_index] = last_pass_clipped;
+      CLIP_PERCENT_BASE[store_index] = last_pass_clip_percent;
+      HF_BASE[store_index] = last_pass_hf_ratio;
+      TRANSIENT_BASE[store_index] = last_pass_transient;
+      CONFIDENCE_BASE[store_index] = last_pass_confidence;
+      VALID_BASE[store_index] = 1;
+      STAGE_BASE[store_index] = current_pass_stage;
+      SCORE_BASE[store_index] = 0;
+    );
+  );
+
+  completed_sequence = finalize_sequence;
+  event_counter += 1;
+  slider1 = 0;
+  previous_manual_measure = 0;
+  sliderchange(slider1);
+);
+
+// Stage/final recommendation engine. Indices are sorted by candidate gain while
+// raw result arrays remain untouched. Scores favor a supported, non-clipped knee:
+// meaningful RMS growth, slope beginning to fall below 1, moderate crest change,
+// retained transients, stable HF ratio, high pass confidence, and neighbors.
+analysis_pending ? (
+  analysis_pending = 0;
+  sort_count = 0;
+  coarse_count = fine_count = precision_count = 0;
+  avg_pass_confidence = 0;
+  pass_i = 0;
+  while(pass_i < stored_pass_count) (
+    VALID_BASE[pass_i] >= 0.5 ? (
+      SORT_INDEX_BASE[sort_count] = pass_i;
+      sort_count += 1;
+      avg_pass_confidence += CONFIDENCE_BASE[pass_i];
+      STAGE_BASE[pass_i] == STAGE_COARSE ? coarse_count += 1;
+      STAGE_BASE[pass_i] == STAGE_FINE ? fine_count += 1;
+      STAGE_BASE[pass_i] == STAGE_PRECISION ? precision_count += 1;
+    );
+    pass_i += 1;
+  );
+
+  sort_pos = 1;
+  while(sort_pos < sort_count) (
+    sort_index_value = SORT_INDEX_BASE[sort_pos];
+    sort_gain_value = GAIN_BASE[sort_index_value];
+    sort_back = sort_pos;
+    while(sort_back > 0
+          && GAIN_BASE[SORT_INDEX_BASE[sort_back - 1]] > sort_gain_value) (
+      SORT_INDEX_BASE[sort_back] = SORT_INDEX_BASE[sort_back - 1];
+      sort_back -= 1;
+    );
+    SORT_INDEX_BASE[sort_back] = sort_index_value;
+    sort_pos += 1;
+  );
+
+  sort_count < MIN_RECOMMENDATION_PASSES ? (
+    analyzer_state = STATE_RECOMMENDATION_UNAVAILABLE;
+    error_code = ERR_NOT_ENOUGH_PASSES;
+    recommendation_confidence = recommendation_score = 0;
+    refinement_requested = clear_knee = 0;
+    winning_candidate_index = -1;
+  ) : (
+    avg_pass_confidence /= sort_count;
+    clear_knee = 0;
+    best_score = -100000;
+    second_score = -100000;
+    best_sorted_position = -1;
+    safe_candidate_count = 0;
+
+    score_pos = 0;
+    while(score_pos < sort_count) (
+      score_index = SORT_INDEX_BASE[score_pos];
+      previous_index = score_pos > 0 ? SORT_INDEX_BASE[score_pos - 1] : -1;
+      next_index = score_pos < sort_count - 1 ? SORT_INDEX_BASE[score_pos + 1] : -1;
+
+      previous_slope = 1;
+      next_slope = 1;
+      previous_index >= 0 ? (
+        gain_delta = max(0.000001, GAIN_BASE[score_index] - GAIN_BASE[previous_index]);
+        previous_slope = (RMS_BASE[score_index] - RMS_BASE[previous_index]) / gain_delta;
+      );
+      next_index >= 0 ? (
+        gain_delta = max(0.000001, GAIN_BASE[next_index] - GAIN_BASE[score_index]);
+        next_slope = (RMS_BASE[next_index] - RMS_BASE[score_index]) / gain_delta;
+      );
+      average_slope = (previous_slope + next_slope) * 0.5;
+      average_slope < KNEE_SLOPE_HIGH && average_slope > KNEE_SLOPE_LOW ? clear_knee = 1;
+
+      candidate_score = max(0, 30 - abs(average_slope - TARGET_KNEE_SLOPE) * 35);
+      candidate_score += max(0, min(20, average_slope * 20));
+      crest_drop = previous_index >= 0
+                   ? max(0, CREST_BASE[previous_index] - CREST_BASE[score_index]) : 0;
+      candidate_score += max(0, 15 - abs(crest_drop - 1.5) * 4);
+      candidate_score += CONFIDENCE_BASE[score_index] * 0.20;
+      score_pos > 0 && score_pos < sort_count - 1 ? candidate_score += 10
+                                                  : candidate_score -= 12;
+      candidate_score -= abs(previous_slope - next_slope) * 8;
+
+      previous_index >= 0 ? (
+        CREST_BASE[previous_index] - CREST_BASE[score_index] > ABRUPT_CREST_DROP_DB
+        ? candidate_score -= 20;
+        TRANSIENT_BASE[previous_index] > 0.000000001
+        && TRANSIENT_BASE[score_index] / TRANSIENT_BASE[previous_index]
+           < TRANSIENT_COLLAPSE_RATIO ? candidate_score -= 25;
+        HF_BASE[previous_index] > 0.000000001
+        && HF_BASE[score_index] / HF_BASE[previous_index] > HF_ABRUPT_RATIO
+        ? candidate_score -= 18;
+      );
+      average_slope < KNEE_SLOPE_LOW ? candidate_score -= 30;
+      CONFIDENCE_BASE[score_index] < LOW_PASS_SCORE_CONFIDENCE ? candidate_score -= 25;
+      candidate_is_safe = CLIPPED_BASE[score_index] < 0.5;
+      candidate_is_safe ? safe_candidate_count += 1 : candidate_score -= 120;
+      SCORE_BASE[score_index] = candidate_score;
+
+      candidate_is_safe && candidate_score > best_score ? (
+        second_score = best_score;
+        best_score = candidate_score;
+        best_sorted_position = score_pos;
+        winning_candidate_index = score_index;
+      ) : candidate_is_safe && candidate_score > second_score ? second_score = candidate_score;
+      score_pos += 1;
+    );
+
+    safe_candidate_count <= 0 ? (
+      analyzer_state = STATE_RECOMMENDATION_UNAVAILABLE;
+      error_code = ERR_NO_SAFE_RECOMMENDATION;
+      recommendation_confidence = recommendation_score = 0;
+      refinement_requested = 0;
+      winning_candidate_index = -1;
+    ) : (
+      recommended_gain = GAIN_BASE[winning_candidate_index];
+      recommendation_score = best_score;
+      second_best_difference = second_score > -99999 ? max(0, best_score - second_score) : 0;
+      winner_is_interior = best_sorted_position > 0 && best_sorted_position < sort_count - 1;
+
+      recommendation_confidence = min(30, sort_count * 3)
+                                + min(30, avg_pass_confidence * 0.30)
+                                + (clear_knee ? 15 : 0)
+                                + (CLIPPED_BASE[winning_candidate_index] < 0.5 ? 10 : 0)
+                                + (winner_is_interior ? 10 : 0)
+                                + min(10, second_best_difference);
+      fine_count + precision_count > 0 ? recommendation_confidence += 5;
+      recommendation_confidence = max(0, min(100, recommendation_confidence));
+
+      analysis_stage == STAGE_COARSE ? (
+        best_sorted_position > 0
+        ? refinement_low = GAIN_BASE[SORT_INDEX_BASE[best_sorted_position - 1]]
+        : refinement_low = max(-24, recommended_gain - 4);
+        best_sorted_position < sort_count - 1
+        ? refinement_high = GAIN_BASE[SORT_INDEX_BASE[best_sorted_position + 1]]
+        : refinement_high = min(24, recommended_gain + 4);
+        refinement_step = 1;
+        refinement_requested = refinement_high - refinement_low >= 1;
+      ) : analysis_stage == STAGE_FINE ? (
+        refinement_low = max(-24, recommended_gain - 1);
+        refinement_high = min(24, recommended_gain + 1);
+        refinement_step = 0.5;
+        refinement_requested = recommendation_confidence < 80
+                               || second_best_difference < NEAR_TIE_SCORE
+                               || !clear_knee || !winner_is_interior;
+      ) : (
+        refinement_low = max(-24, recommended_gain - 1);
+        refinement_high = min(24, recommended_gain + 1);
+        refinement_step = 0.5;
+        refinement_requested = 0;
+      );
+
+      analysis_final ? (
+        analyzer_state = STATE_RECOMMENDATION_READY;
+        analysis_stage = STAGE_FINAL;
+        refinement_requested = 0;
+      ) : analyzer_state = STATE_STAGE_READY;
+      error_code = ERR_NONE;
+    );
+  );
+  completed_sequence = analysis_sequence;
+  event_counter += 1;
+);
+
+// Public telemetry is refreshed once per block.
+gmem[0] = PROTOCOL_VERSION;
+gmem[4] = analyzer_state;
+gmem[5] = event_counter;
+gmem[6] = completed_sequence;
+gmem[7] = max(0, min(1, pass_progress));
+gmem[8] = stored_pass_count;
+gmem[9] = last_pass_valid;
+gmem[10] = last_pass_candidate;
+gmem[11] = last_pass_rms_db;
+gmem[12] = last_pass_crest_db;
+gmem[13] = last_pass_p95_db;
+gmem[14] = last_pass_max_db;
+gmem[15] = last_pass_hf_ratio;
+gmem[16] = last_pass_transient;
+gmem[17] = last_pass_clipped;
+gmem[18] = last_pass_clip_percent;
+gmem[19] = last_pass_confidence;
+gmem[20] = last_pass_active_seconds;
+gmem[21] = last_pass_valid_windows;
+gmem[22] = recommended_gain;
+gmem[23] = recommendation_score;
+gmem[24] = recommendation_confidence;
+gmem[25] = clear_knee;
+gmem[26] = refinement_low;
+gmem[27] = refinement_high;
+gmem[28] = max(0.5, refinement_step);
+gmem[29] = refinement_requested;
+gmem[30] = winning_candidate_index;
+gmem[31] = second_best_difference;
+gmem[32] = error_code;
+gmem[33] = analysis_stage;
+
+@sample
+// Exact stereo pass-through is implicit: spl0 and spl1 are never assigned.
+measuring && slider5 < 0.5 ? (
+  pass_samples += 1;
+  pass_progress = min(1, pass_samples / max_pass_samples);
+
+  magnitude = max(abs(spl0), abs(spl1));
+  mono_proxy = 0.5 * (spl0 + spl1);
+  filter_low += lowpass_alpha * (mono_proxy - filter_low);
+  high_proxy = mono_proxy - filter_low;
+  fast_envelope = max(magnitude, fast_envelope * fast_env_coeff);
+  slow_envelope = max(magnitude, slow_envelope * slow_env_coeff);
+
+  pass_samples > warmup_samples ? (
+    analyzed_samples += 1;
+    max_peak_linear = max(max_peak_linear, magnitude);
+    magnitude >= CLIP_THRESHOLD ? clipped_samples += 1;
+
+    magnitude > silence_threshold ? (
+      active_samples += 1;
+      rms_sum_squares += magnitude * magnitude;
+      total_energy += mono_proxy * mono_proxy;
+      hf_energy += high_proxy * high_proxy;
+      transient_sum += max(0, fast_envelope - slow_envelope);
+    );
+
+    window_peak = max(window_peak, magnitude);
+    window_sample_count += 1;
+    window_sample_count >= window_samples ? (
+      window_peak >= silence_threshold ? (
+        valid_window_count < WINDOW_CAPACITY ? (
+          WINDOW_BASE[valid_window_count] = window_peak;
+          valid_window_count += 1;
+        ) : (
+          window_overflow = 1;
+          measuring = 0;
+          normal_completion = 0;
+          finalize_sequence = active_begin_sequence;
+          finalize_pending = 1;
+        );
+      );
+      window_peak = 0;
+      window_sample_count = 0;
+    );
+  );
+
+  pass_samples >= max_pass_samples ? (
+    timeout_pending = 1;
+    measuring = 0;
+    normal_completion = 0;
+    finalize_sequence = active_begin_sequence;
+    finalize_pending = 1;
+  );
+);
+
+@gfx 800 760
+gfx_clear = 0x181818;
+gfx_setfont(1, "Arial", 22, 'b');
+gfx_r = 0.95; gfx_g = 0.95; gfx_b = 0.95; gfx_a = 1;
+gfx_x = 20; gfx_y = 16; gfx_drawstr("RFX Rig Analyzer");
+gfx_setfont(1, "Arial", 14);
+
+gfx_x = 20; gfx_y = 55; gfx_drawstr("Status: ");
+analyzer_state == STATE_IDLE ? gfx_drawstr("Idle");
+analyzer_state == STATE_MEASURING ? gfx_drawstr("Measuring");
+analyzer_state == STATE_PASS_COMPLETE ? gfx_drawstr("Pass Complete");
+analyzer_state == STATE_PASS_INVALID ? gfx_drawstr("Pass Invalid");
+analyzer_state == STATE_STAGE_READY ? gfx_drawstr("Stage Analysis Ready");
+analyzer_state == STATE_RECOMMENDATION_READY ? gfx_drawstr("Recommendation Ready");
+analyzer_state == STATE_RECOMMENDATION_UNAVAILABLE ? gfx_drawstr("Recommendation Unavailable");
+analyzer_state == STATE_CANCELLED ? gfx_drawstr("Cancelled");
+analyzer_state == STATE_ERROR ? gfx_drawstr("Error");
+gfx_x = 330; gfx_y = 55; gfx_drawstr("Stage: ");
+analysis_stage == STAGE_NONE ? gfx_drawstr("None");
+analysis_stage == STAGE_COARSE ? gfx_drawstr("Coarse");
+analysis_stage == STAGE_FINE ? gfx_drawstr("Fine");
+analysis_stage == STAGE_PRECISION ? gfx_drawstr("Precision");
+analysis_stage == STAGE_FINAL ? gfx_drawstr("Final");
+gfx_x = 20; gfx_y = 79; gfx_printf("Current candidate: %+5.1f dB     Stored passes: %d     Command sequence: %d",
+                                    current_candidate, stored_pass_count, completed_sequence);
+gfx_x = 20; gfx_y = 103; gfx_printf("Current pass progress: %5.1f%%", pass_progress * 100);
+gfx_r = 0.14; gfx_g = 0.14; gfx_b = 0.14; gfx_rect(250, 103, 500, 16, 1);
+gfx_r = 0.25; gfx_g = 0.70; gfx_b = 0.95; gfx_rect(250, 103, 500 * pass_progress, 16, 1);
+
+gfx_r = 0.95; gfx_g = 0.95; gfx_b = 0.95;
+gfx_setfont(1, "Arial", 16, 'b'); gfx_x = 20; gfx_y = 142; gfx_drawstr("Last pass");
+gfx_setfont(1, "Arial", 14);
+gfx_x = 20; gfx_y = 170; gfx_printf("Candidate: %+5.1f dB    Max: %6.1f dBFS    P95: %6.1f dBFS    RMS: %6.1f dBFS",
+                                     last_pass_candidate, last_pass_max_db,
+                                     last_pass_p95_db, last_pass_rms_db);
+gfx_x = 20; gfx_y = 194; gfx_printf("Crest: %5.1f dB    Active: %5.2f s    Windows: %d    Confidence: %.0f%%",
+                                     last_pass_crest_db, last_pass_active_seconds,
+                                     last_pass_valid_windows, last_pass_confidence);
+gfx_x = 20; gfx_y = 218; gfx_printf("HF ratio: %.5f    Transient: %.6f    Clipped: %s (%.4f%%)",
+                                     last_pass_hf_ratio, last_pass_transient,
+                                     last_pass_clipped ? "Yes" : "No", last_pass_clip_percent);
+
+gfx_setfont(1, "Arial", 16, 'b'); gfx_x = 20; gfx_y = 258; gfx_drawstr("Stage analysis");
+gfx_setfont(1, "Arial", 14);
+gfx_x = 20; gfx_y = 286; gfx_printf("Provisional winner: %+5.1f dB    Score: %.1f    Confidence: %.0f%%",
+                                     recommended_gain, recommendation_score,
+                                     recommendation_confidence);
+gfx_x = 20; gfx_y = 310; gfx_printf("Clear knee: %s    Refinement requested: %s",
+                                     clear_knee ? "Yes" : "No",
+                                     refinement_requested ? "Yes" : "No");
+gfx_x = 20; gfx_y = 334; gfx_printf("Refinement: %+5.1f to %+5.1f dB at %.1f dB",
+                                     refinement_low, refinement_high, refinement_step);
+
+gfx_setfont(1, "Arial", 16, 'b'); gfx_x = 20; gfx_y = 374;
+gfx_drawstr("Final recommendation");
+gfx_setfont(1, "Arial", 14);
+gfx_x = 20; gfx_y = 402; gfx_drawstr("Recommended Target Input Gain");
+analyzer_state == STATE_RECOMMENDATION_READY ? (
+  gfx_setfont(1, "Arial", 24, 'b');
+  gfx_r = 0.25; gfx_g = 0.90; gfx_b = 0.45;
+  gfx_x = 20; gfx_y = 426;
+  gfx_printf("RECOMMENDED TARGET INPUT GAIN: %+.1f dB", recommended_gain);
+);
+gfx_setfont(1, "Arial", 14); gfx_r = 0.95; gfx_g = 0.95; gfx_b = 0.95;
+gfx_x = 20; gfx_y = 462; gfx_printf("Score: %.1f    Confidence: %.0f%%    Second-best difference: %.1f",
+                                     recommendation_score, recommendation_confidence,
+                                     second_best_difference);
+
+gfx_setfont(1, "Arial", 16, 'b'); gfx_x = 20; gfx_y = 500; gfx_drawstr("Stored passes");
+gfx_setfont(1, "Courier New", 11);
+gfx_x = 20; gfx_y = 526; gfx_drawstr("Stage  Gain    RMS    Crest     HF      Transient  Clip  Conf  Score");
+table_row = 0;
+while(table_row < min(stored_pass_count, 14)) (
+  gfx_x = 20; gfx_y = 546 + table_row * 15;
+  gfx_printf("%5d %6.1f %7.1f %7.1f %8.4f %10.5f %5s %5.0f %6.1f",
+    STAGE_BASE[table_row], GAIN_BASE[table_row], RMS_BASE[table_row],
+    CREST_BASE[table_row], HF_BASE[table_row], TRANSIENT_BASE[table_row],
+    CLIPPED_BASE[table_row] ? "Yes" : "No", CONFIDENCE_BASE[table_row],
+    SCORE_BASE[table_row]);
+  table_row += 1;
+);
+
+@serialize
+// Completed results persist; active commands, accumulators, and scratch do not.
+serialization_version = 1;
+file_var(0, serialization_version);
+file_var(0, stored_pass_count);
+serialize_i = 0;
+while(serialize_i < MAX_PASSES) (
+  file_var(0, GAIN_BASE[serialize_i]); file_var(0, MAX_PEAK_BASE[serialize_i]);
+  file_var(0, P95_BASE[serialize_i]); file_var(0, RMS_BASE[serialize_i]);
+  file_var(0, CREST_BASE[serialize_i]); file_var(0, ACTIVE_BASE[serialize_i]);
+  file_var(0, WINDOWS_BASE[serialize_i]); file_var(0, CLIPPED_BASE[serialize_i]);
+  file_var(0, CLIP_PERCENT_BASE[serialize_i]); file_var(0, HF_BASE[serialize_i]);
+  file_var(0, TRANSIENT_BASE[serialize_i]); file_var(0, CONFIDENCE_BASE[serialize_i]);
+  file_var(0, VALID_BASE[serialize_i]); file_var(0, STAGE_BASE[serialize_i]);
+  file_var(0, SCORE_BASE[serialize_i]);
+  serialize_i += 1;
+);
+file_var(0, recommended_gain); file_var(0, recommendation_score);
+file_var(0, recommendation_confidence); file_var(0, refinement_low);
+file_var(0, refinement_high); file_var(0, refinement_step);
+file_var(0, clear_knee); file_var(0, refinement_requested);
+file_var(0, winning_candidate_index); file_var(0, second_best_difference);
+file_var(0, analysis_stage);
+serialized_needs_validation = 1;

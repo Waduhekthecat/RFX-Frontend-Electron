@@ -1,0 +1,479 @@
+desc:RFX Input Calibrator
+options:gmem=RFX_INPUT_CALIBRATOR
+
+slider1:0<-24,24,0.1>Input Trim (dB)
+slider2:-7<-24,-1,0.1>Target Peak (dBFS)
+slider3:0<0,1,1{Idle,Learn}>Learn
+slider4:5<1,10,0.5>Learn Duration (seconds)
+slider5:1<0,1,1{Preview Only,Apply Result}>Learn Behavior
+slider6:0<0,1,1{Active,Bypassed}>Bypass
+
+// RFX Input Calibrator prototype.
+//
+// Local memory layout:
+//   0..4095  Accepted 10 ms peak values (linear amplitude).
+// The allocation is fixed and is never changed during playback.
+//
+// Status values (also published in gmem[8]):
+//   0 Idle, 1 Learning, 2 Calibrated, 3 Not enough signal,
+//   4 Cancelled, 5 Analysis overflow.
+//
+// Extended telemetry (the original gmem[0..12] protocol is unchanged):
+//   gmem[13] RMS dBFS, gmem[14] crest factor dB,
+//   gmem[15] confidence 0..100, gmem[16] active playing seconds,
+//   gmem[17] input clipped flag (0 or 1).
+//
+// Calibration success remains unchanged: at least 20 accepted peak windows.
+// Trim remains target dBFS minus the nearest-rank 95th-percentile peak dBFS.
+// RMS, crest factor, activity, clipping, and confidence are diagnostics only.
+
+@init
+PROTOCOL_VERSION = 1;
+STATUS_IDLE = 0;
+STATUS_LEARNING = 1;
+STATUS_CALIBRATED = 2;
+STATUS_NOT_ENOUGH = 3;
+STATUS_CANCELLED = 4;
+STATUS_OVERFLOW = 5;
+
+ANALYSIS_BASE = 0;
+ANALYSIS_CAPACITY = 4096;
+MIN_VALID_WINDOWS = 20;
+DB_FLOOR = -120;
+SILENCE_THRESHOLD_DB = -50;
+CLIP_THRESHOLD = 0.9995;
+MIN_EARLY_ACTIVE_SECONDS = 3;
+MIN_EARLY_CONFIDENCE = 80;
+
+log10_value = log(10);
+silence_threshold = exp(log10_value * SILENCE_THRESHOLD_DB / 20);
+
+cached_srate = max(srate, 1);
+window_samples = max(1, floor(cached_srate * 0.010 + 0.5));
+gain_smooth_coeff = exp(-1 / (0.100 * cached_srate));
+meter_release_coeff = exp(-1 / (0.300 * cached_srate));
+
+target_gain = exp(log10_value * slider1 / 20);
+current_gain = target_gain; // Avoid an unexpected fade when loading non-zero trim.
+gain_initialized = 0; // Reconfirm after REAPER has restored the saved slider state.
+
+input_meter = 0;
+output_meter = 0;
+input_meter_db = DB_FLOOR;
+output_meter_db = DB_FLOOR;
+
+learn_active = 0;
+finalize_pending = 0;
+overflow_pending = 0;
+learn_samples = 0;
+learn_duration_samples = 0;
+window_sample_count = 0;
+window_peak = 0;
+valid_window_count = 0;
+learn_progress = 0;
+status = STATUS_IDLE;
+event_counter = 0;
+
+// RMS uses the channel-max input magnitude, matching peak analysis. It is
+// accumulated only for active samples so pauses do not inflate crest factor.
+rms_sum_squares = 0;
+rms_sample_count = 0;
+active_play_samples = 0;
+active_play_seconds = 0;
+input_clipped = 0;
+confidence_score = 0;
+
+last_measured_db = DB_FLOOR;
+last_calculated_trim = 0;
+last_result_valid = 0;
+last_rms_db = DB_FLOOR;
+last_crest_factor_db = 0;
+
+previous_learn_control = 0;
+previous_bypass = slider6;
+slider3 = 0; // Learn is a momentary operation, not a persistent state.
+
+gmem[0] = PROTOCOL_VERSION;
+gmem[1] = 0;
+gmem[2] = 0;
+gmem[3] = DB_FLOOR;
+gmem[4] = DB_FLOOR;
+gmem[5] = last_measured_db;
+gmem[6] = last_calculated_trim;
+gmem[7] = last_result_valid;
+gmem[8] = status;
+gmem[9] = event_counter;
+gmem[10] = valid_window_count;
+gmem[11] = slider2;
+gmem[12] = slider1;
+gmem[13] = last_rms_db;
+gmem[14] = last_crest_factor_db;
+gmem[15] = confidence_score;
+gmem[16] = active_play_seconds;
+gmem[17] = input_clipped;
+
+@slider
+target_gain = exp(log10_value * slider1 / 20); // Equivalent to 10 ^ (dB / 20).
+
+// Entering bypass during Learn is an explicit cancellation.
+slider6 >= 0.5 && previous_bypass < 0.5 && learn_active ? (
+  learn_active = 0;
+  finalize_pending = 0;
+  overflow_pending = 0;
+  learn_progress = 0;
+  status = STATUS_CANCELLED;
+  last_result_valid = 0;
+  confidence_score = 0;
+  event_counter += 1;
+  slider3 = 0;
+  sliderchange(slider3);
+);
+
+// Leaving bypass starts gain processing at unity, then ramps to the target.
+slider6 < 0.5 && previous_bypass >= 0.5 ? current_gain = 1;
+slider6 >= 0.5 ? current_gain = 1;
+
+// An Idle -> Learn edge begins a fresh measurement, unless bypassed.
+slider3 >= 0.5 && previous_learn_control < 0.5 ? (
+  slider6 >= 0.5 ? (
+    status = STATUS_CANCELLED;
+    last_result_valid = 0;
+    confidence_score = 0;
+    event_counter += 1;
+    slider3 = 0;
+    sliderchange(slider3);
+  ) : (
+    learn_active = 1;
+    finalize_pending = 0;
+    overflow_pending = 0;
+    learn_samples = 0;
+    learn_duration_samples = max(1, floor(slider4 * max(srate, 1) + 0.5));
+    window_sample_count = 0;
+    window_peak = 0;
+    valid_window_count = 0;
+    learn_progress = 0;
+    rms_sum_squares = 0;
+    rms_sample_count = 0;
+    active_play_samples = 0;
+    active_play_seconds = 0;
+    input_clipped = 0;
+    confidence_score = 0;
+    status = STATUS_LEARNING;
+    last_measured_db = DB_FLOOR;
+    last_calculated_trim = 0;
+    last_result_valid = 0;
+    last_rms_db = DB_FLOOR;
+    last_crest_factor_db = 0;
+    event_counter += 1;
+  );
+);
+
+// Returning the control to Idle before completion cancels Learn.
+slider3 < 0.5 && previous_learn_control >= 0.5 && learn_active ? (
+  learn_active = 0;
+  finalize_pending = 0;
+  overflow_pending = 0;
+  learn_progress = 0;
+  status = STATUS_CANCELLED;
+  last_result_valid = 0;
+  confidence_score = 0;
+  event_counter += 1;
+);
+
+previous_learn_control = slider3;
+previous_bypass = slider6;
+
+@block
+// Rebuild sample-rate-dependent timing. A rate change invalidates an active run.
+abs(srate - cached_srate) > 0.5 ? (
+  learn_active || finalize_pending ? (
+    learn_active = 0;
+    finalize_pending = 0;
+    overflow_pending = 0;
+    learn_progress = 0;
+    status = STATUS_CANCELLED;
+    last_result_valid = 0;
+    confidence_score = 0;
+    event_counter += 1;
+    slider3 = 0;
+    previous_learn_control = 0;
+    sliderchange(slider3);
+  );
+  cached_srate = max(srate, 1);
+  window_samples = max(1, floor(cached_srate * 0.010 + 0.5));
+  gain_smooth_coeff = exp(-1 / (0.100 * cached_srate));
+  meter_release_coeff = exp(-1 / (0.300 * cached_srate));
+);
+
+// Finalization happens once, here in @block. Shell sort keeps the code and fixed
+// memory footprint small while avoiding any sorting work in @sample.
+finalize_pending ? (
+  finalize_pending = 0;
+  learn_active = 0;
+
+  // RMS is sqrt(mean(square(active channel-max sample magnitude))). The safe
+  // floor avoids log(0) when a run contains no active input samples.
+  active_play_seconds = active_play_samples / cached_srate;
+  rms_sample_count > 0 ? (
+    last_rms_linear = sqrt(rms_sum_squares / rms_sample_count);
+    last_rms_db = max(DB_FLOOR,
+                      20 * log(max(last_rms_linear, 0.000001)) / log10_value);
+  ) : (
+    last_rms_linear = 0;
+    last_rms_db = DB_FLOOR;
+  );
+
+  overflow_pending ? (
+    overflow_pending = 0;
+    status = STATUS_OVERFLOW;
+    last_result_valid = 0;
+    last_crest_factor_db = 0;
+    confidence_score = 0;
+    event_counter += 1;
+  ) : valid_window_count < MIN_VALID_WINDOWS ? (
+    status = STATUS_NOT_ENOUGH;
+    last_result_valid = 0;
+    last_measured_db = DB_FLOOR;
+    last_crest_factor_db = 0;
+    confidence_score = 0;
+    event_counter += 1;
+  ) : (
+    gap = floor(valid_window_count / 2);
+    while(gap >= 1) (
+      sort_i = gap;
+      while(sort_i < valid_window_count) (
+        sort_value = ANALYSIS_BASE[sort_i];
+        sort_j = sort_i;
+        while(sort_j >= gap && ANALYSIS_BASE[sort_j - gap] > sort_value) (
+          ANALYSIS_BASE[sort_j] = ANALYSIS_BASE[sort_j - gap];
+          sort_j -= gap;
+        );
+        ANALYSIS_BASE[sort_j] = sort_value;
+        sort_i += 1;
+      );
+      gap = floor(gap / 2);
+    );
+
+    // Nearest-rank 95th percentile, converted with a -120 dBFS safety floor.
+    percentile_index = max(0, min(valid_window_count - 1,
+                           ceil(valid_window_count * 0.95) - 1));
+    percentile_peak = max(ANALYSIS_BASE[percentile_index], 0.000001);
+    last_measured_db = max(DB_FLOOR, 20 * log(percentile_peak) / log10_value);
+    last_calculated_trim = max(-24, min(24, slider2 - last_measured_db));
+    last_crest_factor_db = last_measured_db - last_rms_db;
+    last_result_valid = 1;
+
+    // Confidence heuristic: 50 points for enough accepted windows, up to 30
+    // for three seconds of active playing, and 20 when no clipping occurred.
+    // A failed/overflowed run is forced to zero in the branches above.
+    confidence_score = min(50, valid_window_count * 50 / MIN_VALID_WINDOWS)
+                     + min(30, active_play_seconds * 30 / MIN_EARLY_ACTIVE_SECONDS)
+                     + (input_clipped ? 0 : 20);
+    confidence_score = max(0, min(100, confidence_score));
+    status = STATUS_CALIBRATED;
+    learn_progress = 1;
+    event_counter += 1;
+
+    slider5 >= 0.5 ? (
+      slider1 = last_calculated_trim;
+      target_gain = exp(log10_value * slider1 / 20);
+      sliderchange(slider1);
+    );
+  );
+
+  slider3 = 0;
+  previous_learn_control = 0;
+  sliderchange(slider3);
+);
+
+// Meter values and all public telemetry are updated once per audio block.
+input_meter_db = max(DB_FLOOR, 20 * log(max(input_meter, 0.000001)) / log10_value);
+output_meter_db = max(DB_FLOOR, 20 * log(max(output_meter, 0.000001)) / log10_value);
+gmem[0] = PROTOCOL_VERSION;
+gmem[1] = learn_active ? 1 : 0;
+gmem[2] = max(0, min(1, learn_progress));
+gmem[3] = input_meter_db;
+gmem[4] = output_meter_db;
+gmem[5] = last_measured_db;
+gmem[6] = last_calculated_trim;
+gmem[7] = last_result_valid;
+gmem[8] = status;
+gmem[9] = event_counter;
+gmem[10] = valid_window_count;
+gmem[11] = slider2;
+gmem[12] = slider1;
+gmem[13] = last_rms_db;
+gmem[14] = last_crest_factor_db;
+gmem[15] = max(0, min(100, confidence_score));
+gmem[16] = max(0, active_play_seconds);
+gmem[17] = input_clipped ? 1 : 0;
+
+@sample
+// Analyze and meter the untouched input before applying gain.
+input_peak = max(abs(spl0), abs(spl1));
+input_meter = max(input_peak, input_meter * meter_release_coeff);
+
+learn_active && !finalize_pending ? (
+  input_peak >= CLIP_THRESHOLD ? input_clipped = 1;
+
+  // Activity and RMS are sample-accurate but include only signal above the
+  // existing silence threshold. The channel-max magnitude keeps mono-left,
+  // dual-mono, and stereo behavior aligned with the peak analyzer.
+  input_peak > silence_threshold ? (
+    active_play_samples += 1;
+    rms_sum_squares += input_peak * input_peak;
+    rms_sample_count += 1;
+  );
+
+  window_peak = max(window_peak, input_peak);
+  window_sample_count += 1;
+  learn_samples += 1;
+
+  window_sample_count >= window_samples ? (
+    window_peak >= silence_threshold ? (
+      valid_window_count < ANALYSIS_CAPACITY ? (
+        ANALYSIS_BASE[valid_window_count] = window_peak;
+        valid_window_count += 1;
+      ) : (
+        overflow_pending = 1;
+        finalize_pending = 1;
+      );
+    );
+    window_peak = 0;
+    window_sample_count = 0;
+
+    active_play_seconds = active_play_samples / cached_srate;
+
+    // Provisional confidence uses only information already collected. The
+    // valid-result requirement is represented by MIN_VALID_WINDOWS; final
+    // failure and overflow paths explicitly force confidence to zero.
+    confidence_score = min(50, valid_window_count * 50 / MIN_VALID_WINDOWS)
+                     + min(30, active_play_seconds * 30 / MIN_EARLY_ACTIVE_SECONDS)
+                     + (input_clipped ? 0 : 20);
+    confidence_score = max(0, min(100, confidence_score));
+
+    // Early completion adds stricter quality gates without changing ordinary
+    // full-duration success: enough active playing, windows, and confidence.
+    !overflow_pending
+    && active_play_seconds >= MIN_EARLY_ACTIVE_SECONDS
+    && valid_window_count >= MIN_VALID_WINDOWS
+    && confidence_score >= MIN_EARLY_CONFIDENCE ? finalize_pending = 1;
+  );
+
+  learn_progress = min(1, learn_samples / learn_duration_samples);
+  learn_samples >= learn_duration_samples ? finalize_pending = 1;
+);
+
+// One shared, sample-smoothed gain preserves the stereo image.
+!gain_initialized ? (
+  current_gain = target_gain;
+  gain_initialized = 1;
+);
+current_gain = target_gain + gain_smooth_coeff * (current_gain - target_gain);
+slider6 >= 0.5 ? (
+  // Exact pass-through while bypassed; meters remain active.
+  output_left = spl0;
+  output_right = spl1;
+) : (
+  output_left = spl0 * current_gain;
+  output_right = spl1 * current_gain;
+);
+
+output_peak = max(abs(output_left), abs(output_right));
+output_meter = max(output_peak, output_meter * meter_release_coeff);
+spl0 = output_left;
+spl1 = output_right;
+
+@gfx 640 620
+gfx_clear = 0x181818;
+gfx_setfont(1, "Arial", 22, 'b');
+gfx_r = 0.94; gfx_g = 0.94; gfx_b = 0.94; gfx_a = 1;
+gfx_x = 22; gfx_y = 18;
+gfx_drawstr("RFX Input Calibrator");
+
+gfx_setfont(1, "Arial", 15);
+
+// Input meter (-60 to 0 dBFS display range).
+gfx_x = 22; gfx_y = 66; gfx_drawstr("Input");
+gfx_r = 0.15; gfx_g = 0.15; gfx_b = 0.15;
+gfx_rect(120, 66, 420, 18, 1);
+meter_width = 420 * max(0, min(1, (input_meter_db + 60) / 60));
+gfx_r = 0.20; gfx_g = 0.78; gfx_b = 0.40;
+gfx_rect(120, 66, meter_width, 18, 1);
+gfx_r = 0.94; gfx_g = 0.94; gfx_b = 0.94;
+gfx_x = 550; gfx_y = 66; gfx_printf("%6.1f dBFS", input_meter_db);
+
+// Output meter (-60 to 0 dBFS display range).
+gfx_x = 22; gfx_y = 98; gfx_drawstr("Output");
+gfx_r = 0.15; gfx_g = 0.15; gfx_b = 0.15;
+gfx_rect(120, 98, 420, 18, 1);
+meter_width = 420 * max(0, min(1, (output_meter_db + 60) / 60));
+gfx_r = 0.24; gfx_g = 0.58; gfx_b = 0.95;
+gfx_rect(120, 98, meter_width, 18, 1);
+gfx_r = 0.94; gfx_g = 0.94; gfx_b = 0.94;
+gfx_x = 550; gfx_y = 98; gfx_printf("%6.1f dBFS", output_meter_db);
+
+gfx_x = 22; gfx_y = 140; gfx_printf("Current trim:              %6.1f dB", slider1);
+gfx_x = 22; gfx_y = 166; gfx_printf("Target peak:               %6.1f dBFS", slider2);
+gfx_x = 22; gfx_y = 192; gfx_printf("Calculated trim:           %6.1f dB", last_calculated_trim);
+gfx_x = 22; gfx_y = 218; gfx_printf("Valid windows:             %6d", valid_window_count);
+
+// Extended Learn diagnostics. Crest-factor quality labels are intentionally
+// broad heuristics: >=18 Very Dynamic, >=14 Dynamic, >=10 Average, else Compressed.
+gfx_x = 22; gfx_y = 255; gfx_printf("Peak (95th percentile):    %6.1f dBFS", last_measured_db);
+gfx_x = 22; gfx_y = 281; gfx_printf("RMS:                       %6.1f dBFS", last_rms_db);
+gfx_x = 22; gfx_y = 307; gfx_printf("Playing Dynamics:          %6.1f dB", last_crest_factor_db);
+gfx_x = 22; gfx_y = 333; gfx_drawstr("Dynamics quality:          ");
+last_result_valid ? (
+  last_crest_factor_db >= 18 ? gfx_drawstr("Very Dynamic")
+  : last_crest_factor_db >= 14 ? gfx_drawstr("Dynamic")
+  : last_crest_factor_db >= 10 ? gfx_drawstr("Average")
+  : gfx_drawstr("Compressed");
+) : gfx_drawstr("Unavailable");
+gfx_x = 22; gfx_y = 359; gfx_printf("Confidence:                %6.0f%%", confidence_score);
+gfx_x = 22; gfx_y = 385; gfx_printf("Active Playing:            %6.2f s", active_play_seconds);
+gfx_x = 22; gfx_y = 411; gfx_drawstr("Clipping:                  ");
+input_clipped ? gfx_drawstr("Detected") : gfx_drawstr("None");
+
+gfx_x = 22; gfx_y = 450; gfx_drawstr("Learn progress");
+gfx_r = 0.15; gfx_g = 0.15; gfx_b = 0.15;
+gfx_rect(150, 450, 390, 18, 1);
+gfx_r = 0.95; gfx_g = 0.65; gfx_b = 0.20;
+gfx_rect(150, 450, 390 * max(0, min(1, learn_progress)), 18, 1);
+gfx_r = 0.94; gfx_g = 0.94; gfx_b = 0.94;
+gfx_x = 550; gfx_y = 450; gfx_printf("%5.1f%%", learn_progress * 100);
+
+gfx_x = 22; gfx_y = 492; gfx_drawstr("Status: ");
+status == STATUS_IDLE ? gfx_drawstr("Idle");
+status == STATUS_LEARNING ? gfx_drawstr("Learning");
+status == STATUS_CALIBRATED ? gfx_drawstr("Calibrated");
+status == STATUS_NOT_ENOUGH ? gfx_drawstr("Not enough signal");
+status == STATUS_CANCELLED ? gfx_drawstr("Cancelled");
+status == STATUS_OVERFLOW ? gfx_drawstr("Analysis overflow");
+status == STATUS_CALIBRATED ? (
+  gfx_x = 300; gfx_y = 492; gfx_drawstr("Calibration Complete");
+);
+
+gfx_x = 22; gfx_y = 528;
+slider5 >= 0.5 ? gfx_drawstr("Mode: Apply Result") : gfx_drawstr("Mode: Preview Only");
+gfx_x = 270; gfx_y = 528;
+slider6 >= 0.5 ? gfx_drawstr("Audio: Bypassed") : gfx_drawstr("Audio: Active");
+
+input_clipped ? (
+  gfx_r = 1; gfx_g = 0.35; gfx_b = 0.25;
+  gfx_x = 22; gfx_y = 566; gfx_setfont(1, "Arial", 15, 'b');
+  gfx_drawstr("WARNING: Input clipped");
+  gfx_x = 22; gfx_y = 590; gfx_setfont(1, "Arial", 14);
+  gfx_drawstr("Calibration may be inaccurate.");
+);
+
+@serialize
+// Sliders are persisted by REAPER; only the most recent result is serialized.
+file_var(0, last_measured_db);
+file_var(0, last_calculated_trim);
+file_var(0, last_result_valid);
+file_var(0, last_rms_db);
+file_var(0, last_crest_factor_db);
+file_var(0, confidence_score);
+file_var(0, active_play_seconds);
+file_var(0, input_clipped);
